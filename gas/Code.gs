@@ -1,31 +1,40 @@
 /**
  * Backend Presensi Kajian Pegawai (Google Apps Script + Google Sheets).
- * Jalankan setup() satu kali untuk membuat sheet Config, Pegawai, Presensi dan API_KEY.
+ * Jalankan setup() satu kali (atau lagi setelah update kode) untuk menyiapkan sheet dan API_KEY.
  */
 const TZ = 'Asia/Makassar';
 const SHEET = { CONFIG: 'Config', PEGAWAI: 'Pegawai', PRESENSI: 'Presensi' };
 const JENIS_VALID = ['Mulai', 'Selesai'];
 
-/* ============ SETUP (jalankan sekali dari editor) ============ */
+const DEFAULT_CONFIG = [
+  ['namaKegiatan', 'Kajian Pegawai', 'Judul kegiatan'],
+  ['namaLokasi', 'Masjid Syarifah Shalihah', 'Nama lokasi kajian'],
+  ['latitude', -3.4331621, 'Titik pusat presensi'],
+  ['longitude', 114.845775, 'Titik pusat presensi'],
+  ['radiusMeter', 20, 'Jarak maksimal dari titik pusat (meter)'],
+  ['maxAkurasi', 100, 'Presensi ditolak jika akurasi GPS lebih buruk dari ini (meter)'],
+  ['toleransiMeter', 0, 'Tambahan jarak (meter) untuk selisih GPS. 0 = ketat sesuai radius'],
+];
+
+/* ============ SETUP (aman dijalankan berulang) ============ */
 function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  let cfg = ss.getSheetByName(SHEET.CONFIG) || ss.insertSheet(SHEET.CONFIG);
+  const cfg = ss.getSheetByName(SHEET.CONFIG) || ss.insertSheet(SHEET.CONFIG);
   if (cfg.getLastRow() === 0) {
-    cfg.getRange(1, 1, 7, 3).setValues([
-      ['Kunci', 'Nilai', 'Keterangan'],
-      ['namaKegiatan', 'Kajian Pegawai', 'Judul kegiatan'],
-      ['namaLokasi', 'Masjid Syarifah Shalihah', 'Nama lokasi kajian'],
-      ['latitude', -3.4331621, 'Titik pusat presensi'],
-      ['longitude', 114.845775, 'Titik pusat presensi'],
-      ['radiusMeter', 20, 'Jarak maksimal dari titik pusat (meter)'],
-      ['maxAkurasi', 50, 'Presensi ditolak jika akurasi GPS lebih buruk dari ini (meter)'],
-    ]);
+    cfg.getRange(1, 1, 1, 3).setValues([['Kunci', 'Nilai', 'Keterangan']]);
     cfg.setFrozenRows(1);
     cfg.setColumnWidths(1, 3, 220);
   }
+  const have = {};
+  cfg.getDataRange().getValues().forEach(function (r, i) { if (r[0]) have[String(r[0]).trim()] = i + 1; });
+  DEFAULT_CONFIG.forEach(function (d) { if (!have[d[0]]) cfg.appendRow(d); });
+  // Nilai awal lama (50 m) terlalu ketat untuk GPS di dalam bangunan
+  if (have.maxAkurasi && Number(cfg.getRange(have.maxAkurasi, 2).getValue()) === 50) {
+    cfg.getRange(have.maxAkurasi, 2).setValue(100);
+  }
 
-  let peg = ss.getSheetByName(SHEET.PEGAWAI) || ss.insertSheet(SHEET.PEGAWAI);
+  const peg = ss.getSheetByName(SHEET.PEGAWAI) || ss.insertSheet(SHEET.PEGAWAI);
   if (peg.getLastRow() === 0) {
     peg.getRange('D:D').setNumberFormat('@'); // PIN sebagai teks agar angka 0 di depan tidak hilang
     peg.getRange(1, 1, 3, 4).setValues([
@@ -36,7 +45,7 @@ function setup() {
     peg.setFrozenRows(1);
   }
 
-  let pr = ss.getSheetByName(SHEET.PRESENSI) || ss.insertSheet(SHEET.PRESENSI);
+  const pr = ss.getSheetByName(SHEET.PRESENSI) || ss.insertSheet(SHEET.PRESENSI);
   if (pr.getLastRow() === 0) {
     pr.getRange('A:A').setNumberFormat('yyyy-mm-dd hh:mm:ss');
     pr.getRange('B:C').setNumberFormat('@');
@@ -57,17 +66,27 @@ function setup() {
 /* ============ ENDPOINT ============ */
 function doGet(e) {
   try {
-    assertKey_(e && e.parameter && e.parameter.key);
-    if (!e.parameter || e.parameter.action !== 'init') throw new Error('Aksi tidak dikenal.');
+    const p = (e && e.parameter) || {};
+    assertKey_(p.key);
 
-    const rows = sheet_(SHEET.PEGAWAI).getDataRange().getValues().slice(1);
-    const pegawai = rows
-      .filter(function (r) { return r[0] && r[1]; })
-      .map(function (r) {
-        return { id: String(r[0]).trim(), nama: String(r[1]).trim(), jabatan: String(r[2] || '').trim() };
-      });
+    if (p.action === 'init') {
+      const rows = sheet_(SHEET.PEGAWAI).getDataRange().getValues().slice(1);
+      const pegawai = rows
+        .filter(function (r) { return r[0] && r[1]; })
+        .map(function (r) {
+          return { id: String(r[0]).trim(), nama: String(r[1]).trim(), jabatan: String(r[2] || '').trim() };
+        });
+      return json_({ ok: true, config: readConfig_(), pegawai: pegawai });
+    }
 
-    return json_({ ok: true, config: readConfig_(), pegawai: pegawai });
+    if (p.action === 'riwayat') {
+      const tanggal = /^\d{4}-\d{2}-\d{2}$/.test(p.tanggal || '')
+        ? p.tanggal
+        : Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+      return json_({ ok: true, tanggal: tanggal, rows: riwayat_(tanggal) });
+    }
+
+    throw new Error('Aksi tidak dikenal.');
   } catch (err) {
     return json_({ ok: false, error: err.message });
   }
@@ -104,13 +123,15 @@ function doPost(e) {
     cache.remove(failKey);
 
     if (akurasi > cfg.maxAkurasi) {
-      throw new Error('Akurasi GPS ±' + Math.round(akurasi) + ' m terlalu rendah. Pindah ke area terbuka lalu coba lagi.');
+      throw new Error('Akurasi GPS ±' + Math.round(akurasi) + ' m belum cukup (maksimal ' + cfg.maxAkurasi +
+        ' m). Pindah ke area terbuka lalu coba lagi.');
     }
 
+    const batas = cfg.radiusMeter + cfg.toleransiMeter;
     const jarak = haversine_(cfg.latitude, cfg.longitude, lat, lng);
-    if (jarak > cfg.radiusMeter) {
+    if (jarak > batas) {
       throw new Error('Anda berada ' + Math.round(jarak) + ' m dari ' + cfg.namaLokasi +
-        '. Batas presensi ' + cfg.radiusMeter + ' m.');
+        '. Batas presensi ' + batas + ' m.');
     }
 
     const now = new Date();
@@ -124,7 +145,7 @@ function doPost(e) {
       const from = Math.max(2, last - 499);
       const vals = sh.getRange(from, 2, last - from + 1, 6).getValues(); // kolom B..G
       const dup = vals.some(function (r) {
-        return String(r[0]) === tanggal && String(r[2]) === peg.id && String(r[5]) === jenis;
+        return text_(r[0], 'yyyy-MM-dd') === tanggal && String(r[2]) === peg.id && String(r[5]) === jenis;
       });
       if (dup) throw new Error(peg.nama + ' sudah tercatat ' + jenis.toLowerCase() + ' hari ini.');
     }
@@ -148,6 +169,35 @@ function sheet_(name) {
   return sh;
 }
 
+/** Nilai sel sebagai teks (jaga-jaga jika Sheets mengubahnya menjadi tanggal/jam). */
+function text_(v, fmt) {
+  return v instanceof Date ? Utilities.formatDate(v, TZ, fmt) : String(v);
+}
+
+/** Riwayat per pegawai pada satu tanggal: jam Mulai dan jam Selesai (jika sudah). */
+function riwayat_(tanggal) {
+  const sh = sheet_(SHEET.PRESENSI);
+  const last = sh.getLastRow();
+  if (last < 2) return [];
+  const vals = sh.getRange(2, 2, last - 1, 6).getValues(); // B..G: Tanggal, Jam, ID, Nama, Jabatan, Jenis
+  const map = {}, order = [];
+  vals.forEach(function (r) {
+    if (text_(r[0], 'yyyy-MM-dd') !== tanggal) return;
+    const id = String(r[2]);
+    if (!map[id]) {
+      map[id] = { id: id, nama: String(r[3]), jabatan: String(r[4]), mulai: '', selesai: '' };
+      order.push(id);
+    }
+    const jam = text_(r[1], 'HH:mm:ss').slice(0, 5);
+    const jenis = String(r[5]);
+    if (jenis === 'Mulai' && !map[id].mulai) map[id].mulai = jam;
+    if (jenis === 'Selesai' && !map[id].selesai) map[id].selesai = jam;
+  });
+  return order.map(function (id) { return map[id]; }).sort(function (a, b) {
+    return (a.mulai || '99:99').localeCompare(b.mulai || '99:99') || a.nama.localeCompare(b.nama);
+  });
+}
+
 function readConfig_() {
   const rows = sheet_(SHEET.CONFIG).getDataRange().getValues().slice(1);
   const m = {};
@@ -158,7 +208,8 @@ function readConfig_() {
     latitude: Number(m.latitude),
     longitude: Number(m.longitude),
     radiusMeter: Number(m.radiusMeter) || 20,
-    maxAkurasi: Number(m.maxAkurasi) || 50,
+    maxAkurasi: Number(m.maxAkurasi) || 100,
+    toleransiMeter: Number(m.toleransiMeter) || 0,
   };
   if (!isFinite(cfg.latitude) || !isFinite(cfg.longitude)) throw new Error('Koordinat pada sheet Config tidak valid.');
   return cfg;

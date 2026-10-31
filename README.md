@@ -25,9 +25,15 @@ Setiap mengubah `Code.gs`, buat **New deployment / Manage deployments > New vers
 
 ## 2. Isi data di spreadsheet
 
-- **Config**: koordinat, radius (`radiusMeter`, default 20), dan `maxAkurasi` (default 50 m). Ubah di sini tanpa deploy ulang.
+- **Config**: koordinat, `radiusMeter` (default 20), `maxAkurasi` (default 100 m), dan `toleransiMeter` (default 0). Ubah di sini tanpa deploy ulang.
 - **Pegawai**: kolom `ID`, `Nama`, `Jabatan`, `PIN`. Ganti dua baris contoh dengan data asli. Kolom PIN berformat teks.
-- **Presensi**: terisi otomatis (Timestamp, Tanggal, Jam, pegawai, Jenis, koordinat, akurasi, jarak, status).
+- **Presensi**: terisi otomatis (Timestamp, Tanggal, Jam, pegawai, Jenis, koordinat, akurasi, jarak, status). Sheet ini juga menjadi sumber **Riwayat presensi** di bagian bawah halaman.
+
+## Memperbarui dari versi sebelumnya
+
+1. Ganti isi Apps Script dengan `gas/Code.gs` terbaru, lalu jalankan `setup()` sekali lagi. Fungsi ini menambah kunci Config yang baru dan mengubah `maxAkurasi` dari 50 menjadi 100 bila masih nilai lama. Data yang sudah ada tidak dihapus.
+2. **Deploy > Manage deployments > Edit > New version** agar kode baru aktif. URL tidak berubah.
+3. Ganti `public/logo.png` dan `app/icon.png` bila logo berubah.
 
 ## 3. Jalankan di VS Code
 
@@ -58,8 +64,16 @@ git push -u origin main
 2. Isi **Environment Variables**: `GAS_URL` dan `API_KEY`.
 3. Klik **Deploy**. Setiap `git push` ke `main` akan otomatis deploy ulang.
 
+## Bila GPS masih dinilai lemah
+
+- Laptop atau PC tidak punya GPS. Browser memakai Wi-Fi atau IP dengan akurasi ratusan meter, sehingga selalu ditolak. Gunakan HP.
+- Di HP: aktifkan GPS dengan mode akurasi tinggi, dan izinkan lokasi presisi (iPhone: Precise Location) untuk browser.
+- Di dalam bangunan, dekati jendela atau pintu dan tunggu 10 sampai 20 detik. Aplikasi menggabungkan pembacaan 15 detik terakhir sehingga hasilnya makin stabil.
+- Bila akurasi sudah baik tetapi jarak tampak berbeda 5 sampai 15 m dari kenyataan, isi `toleransiMeter` di sheet Config (misalnya 10). Batas presensi menjadi radius ditambah toleransi.
+
 ## Catatan keamanan
 
 - GPS di browser tetap bisa dipalsukan (aplikasi fake GPS). PIN, batas akurasi, pencegahan presensi ganda, dan pembatasan percobaan PIN (5 kali per 10 menit) mengurangi risikonya, tetapi tidak menghilangkannya.
 - `GAS_URL` dan `API_KEY` hanya dipakai di server Next.js, tidak dikirim ke browser.
 - Ganti PIN contoh sebelum dipakai.
+- Riwayat presensi (nama, jabatan, jam mulai dan selesai) dapat dilihat siapa pun yang memiliki URL web. PIN dan koordinat tidak ditampilkan.

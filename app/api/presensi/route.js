@@ -21,10 +21,18 @@ async function readGas(res) {
   }
 }
 
-export async function GET() {
+/** GET /api/presensi                       -> konfigurasi lokasi + daftar pegawai
+ *  GET /api/presensi?action=riwayat&tanggal=yyyy-mm-dd -> riwayat presensi per tanggal */
+export async function GET(request) {
   if (!GAS_URL || !API_KEY) return misconfigured();
   try {
-    const url = `${GAS_URL}?action=init&key=${encodeURIComponent(API_KEY)}`;
+    const { searchParams } = new URL(request.url);
+    const isRiwayat = searchParams.get("action") === "riwayat";
+    let url = `${GAS_URL}?action=${isRiwayat ? "riwayat" : "init"}&key=${encodeURIComponent(API_KEY)}`;
+    if (isRiwayat) {
+      const tanggal = searchParams.get("tanggal") || "";
+      if (/^\d{4}-\d{2}-\d{2}$/.test(tanggal)) url += `&tanggal=${tanggal}`;
+    }
     const res = await fetch(url, { cache: "no-store", redirect: "follow" });
     const data = await readGas(res);
     return NextResponse.json(data, { status: data.ok ? 200 : 502 });

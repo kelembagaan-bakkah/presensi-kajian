@@ -1,6 +1,6 @@
 /**
- * Peta radar sederhana: titik pusat = lokasi kajian, lingkaran putus-putus = radius presensi,
- * titik emas = posisi pegawai. Skala otomatis menyesuaikan jarak.
+ * Radar posisi: titik pusat = lokasi kajian, lingkaran putus-putus = batas presensi,
+ * titik = posisi pegawai. Skala otomatis menyesuaikan jarak.
  */
 export default function Radar({ radius, point, inRange, label }) {
   const S = 300;
@@ -13,6 +13,7 @@ export default function Radar({ radius, point, inRange, label }) {
   const ring = radius * k;
   const ux = point ? C + point.dx * k : C;
   const uy = point ? C - point.dy * k : C;
+  const tone = inRange ? " in" : "";
 
   return (
     <svg className="radar" viewBox={`0 0 ${S} ${S}`} role="img" aria-label={label}>
@@ -25,7 +26,7 @@ export default function Radar({ radius, point, inRange, label }) {
         U
       </text>
 
-      <circle className={`r-fence${inRange ? " in" : ""}`} cx={C} cy={C} r={ring} />
+      <circle className={`r-fence${tone}`} cx={C} cy={C} r={ring} />
       <text className="r-ring" x={C} y={C - ring - 7} textAnchor="middle">
         {radius} m
       </text>
@@ -38,8 +39,8 @@ export default function Radar({ radius, point, inRange, label }) {
       {point && (
         <g>
           <line className="r-link" x1={C} y1={C} x2={ux} y2={uy} />
-          <circle className="r-pulse" cx={ux} cy={uy} r="7" />
-          <circle className={`r-user${inRange ? " in" : ""}`} cx={ux} cy={uy} r="7" />
+          <circle className={`r-pulse${tone}`} cx={ux} cy={uy} r="7" />
+          <circle className={`r-user${tone}`} cx={ux} cy={uy} r="7" />
         </g>
       )}
     </svg>
