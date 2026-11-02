@@ -29,11 +29,17 @@ Setiap mengubah `Code.gs`, buat **New deployment / Manage deployments > New vers
 - **Pegawai**: kolom `ID`, `Nama`, `Jabatan`, `PIN`. Ganti dua baris contoh dengan data asli. Kolom PIN berformat teks.
 - **Presensi**: terisi otomatis (Timestamp, Tanggal, Jam, pegawai, Jenis, koordinat, akurasi, jarak, status). Sheet ini juga menjadi sumber **Riwayat presensi** di bagian bawah halaman.
 
+## Riwayat dan export Excel
+
+- Riwayat tampil 10 baris per halaman, dengan tombol Sebelumnya dan Berikutnya. Pilih tanggal untuk melihat hari lain.
+- Tombol **Excel** mengunduh `riwayat-presensi-yyyy-mm-dd.xlsx` berisi semua pegawai pada tanggal terpilih (bukan hanya halaman yang tampil): No, Nama, Jabatan, Mulai, Selesai, Durasi, Status. File dibuat di server Next.js memakai paket `exceljs`, jadi jalankan `npm install` setelah memperbarui proyek.
+
 ## Memperbarui dari versi sebelumnya
 
 1. Ganti isi Apps Script dengan `gas/Code.gs` terbaru, lalu jalankan `setup()` sekali lagi. Fungsi ini menambah kunci Config yang baru dan mengubah `maxAkurasi` dari 50 menjadi 100 bila masih nilai lama. Data yang sudah ada tidak dihapus.
 2. **Deploy > Manage deployments > Edit > New version** agar kode baru aktif. URL tidak berubah.
-3. Ganti `public/logo.png` dan `app/icon.png` bila logo berubah.
+3. **Zona waktu WITA**: di Apps Script buka **Project Settings (ikon roda gigi)**, centang **Show "appsscript.json" manifest file in editor**, lalu pastikan `"timeZone": "Asia/Makassar"` (contoh ada di `gas/appsscript.json`). Fungsi `setup()` juga menyetel zona waktu spreadsheet ke WITA. Cek manual di spreadsheet: **File > Settings > Time zone** harus `(GMT+08:00) Makassar`.
+4. Ganti `public/logo.png` dan `app/icon.png` bila logo berubah.
 
 ## 3. Jalankan di VS Code
 

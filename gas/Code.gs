@@ -2,7 +2,7 @@
  * Backend Presensi Kajian Pegawai (Google Apps Script + Google Sheets).
  * Jalankan setup() satu kali (atau lagi setelah update kode) untuk menyiapkan sheet dan API_KEY.
  */
-const TZ = 'Asia/Makassar';
+const TZ = 'Asia/Makassar'; // WITA (UTC+8). Semua tanggal dan jam presensi memakai zona ini.
 const SHEET = { CONFIG: 'Config', PEGAWAI: 'Pegawai', PRESENSI: 'Presensi' };
 const JENIS_VALID = ['Mulai', 'Selesai'];
 
@@ -19,6 +19,7 @@ const DEFAULT_CONFIG = [
 /* ============ SETUP (aman dijalankan berulang) ============ */
 function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ss.setSpreadsheetTimeZone(TZ); // kolom Timestamp mengikuti zona waktu spreadsheet, samakan dengan WITA
 
   const cfg = ss.getSheetByName(SHEET.CONFIG) || ss.insertSheet(SHEET.CONFIG);
   if (cfg.getLastRow() === 0) {
@@ -50,11 +51,13 @@ function setup() {
     pr.getRange('A:A').setNumberFormat('yyyy-mm-dd hh:mm:ss');
     pr.getRange('B:C').setNumberFormat('@');
     pr.getRange(1, 1, 1, 12).setValues([[
-      'Timestamp', 'Tanggal', 'Jam', 'ID Pegawai', 'Nama', 'Jabatan',
+      'Timestamp (WITA)', 'Tanggal', 'Jam (WITA)', 'ID Pegawai', 'Nama', 'Jabatan',
       'Jenis', 'Latitude', 'Longitude', 'Akurasi (m)', 'Jarak (m)', 'Status',
     ]]);
     pr.setFrozenRows(1);
   }
+  pr.getRange('A1').setValue('Timestamp (WITA)');
+  pr.getRange('C1').setValue('Jam (WITA)');
 
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty('API_KEY')) {

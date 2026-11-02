@@ -6,8 +6,8 @@ import Riwayat from "../components/Riwayat";
 import { haversine, offsetMeters } from "../lib/geo";
 
 const JENIS = [
-  { value: "Mulai", hint: "Kajian akan dimulai" },
-  { value: "Selesai", hint: "Kajian telah usai" },
+  { value: "Mulai", hint: "Awal kajian" },
+  { value: "Selesai", hint: "Akhir kajian" },
 ];
 
 const STORAGE_KEY = "presensi-kajian:pegawai";
@@ -19,7 +19,7 @@ const fmtTime = new Intl.DateTimeFormat("id-ID", {
   timeZone: TZ, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
 });
 const fmtDate = new Intl.DateTimeFormat("id-ID", {
-  timeZone: TZ, weekday: "long", day: "numeric", month: "long", year: "numeric",
+  timeZone: TZ, weekday: "short", day: "numeric", month: "short", year: "numeric",
 });
 const fmtIso = new Intl.DateTimeFormat("en-CA", { timeZone: TZ }); // yyyy-mm-dd
 
@@ -272,7 +272,7 @@ export default function Page() {
         <div className="hero-inner">
           <div className="brand">
             <span className="badge">
-              <img src="/logo.png" alt="Logo Yayasan Sa'adah Martapura" width="68" height="68" />
+              <img src="/logo.png" alt="Logo Yayasan Sa'adah Martapura" width="40" height="40" />
             </span>
             <div>
               <h1>Presensi kajian pegawai</h1>
@@ -287,8 +287,8 @@ export default function Page() {
       </header>
 
       <div className="grid">
-        {/* Radar posisi */}
-        <section className="panel" aria-live="polite">
+        {/* Lokasi dan jarak */}
+        <section className="panel loc" aria-live="polite">
           <Radar radius={limit} point={metrics} inRange={inRange} label={radarLabel} />
           <div className="readout">
             <div className="big">
@@ -296,21 +296,21 @@ export default function Page() {
               <span> m</span>
             </div>
             <p className="caption">
-              {cfg ? `dari titik kajian, batas presensi ${limit} m` : "dari titik kajian"}
-            </p>
-            <p className={`status ${status.tone}`}>
-              <i aria-hidden="true" />
-              {status.text}
+              {cfg ? `dari titik kajian, batas ${limit} m` : "dari titik kajian"}
             </p>
             {metrics && (
               <p className="acc">
                 Akurasi GPS ±{Math.round(metrics.acc)} m ({accLabel(metrics.acc, cfg.maxAkurasi)})
               </p>
             )}
-            <button type="button" className="ghost" onClick={startWatch}>
+            <button type="button" className="ghost small" onClick={startWatch}>
               {geo.state === "denied" || geo.state === "error" ? "Cari lokasi lagi" : "Perbarui lokasi"}
             </button>
           </div>
+          <p className={`status ${status.tone}`}>
+            <i aria-hidden="true" />
+            {status.text}
+          </p>
         </section>
 
         {/* Formulir */}
@@ -383,7 +383,7 @@ export default function Page() {
             <div className="notice err" role="alert">
               <strong>Data kajian belum termuat</strong>
               <p>{boot.error}</p>
-              <button type="button" className="ghost" onClick={loadBoot}>
+              <button type="button" className="ghost small" onClick={loadBoot}>
                 Muat ulang data
               </button>
             </div>

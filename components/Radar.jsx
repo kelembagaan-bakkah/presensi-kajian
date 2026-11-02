@@ -1,11 +1,11 @@
 /**
- * Radar posisi: titik pusat = lokasi kajian, lingkaran putus-putus = batas presensi,
- * titik = posisi pegawai. Skala otomatis menyesuaikan jarak.
+ * Radar posisi (ukuran kecil): titik pusat = lokasi kajian, lingkaran putus-putus = batas presensi,
+ * titik = posisi pegawai. Skala otomatis menyesuaikan jarak. Ukuran tampil diatur lewat CSS (.radar).
  */
 export default function Radar({ radius, point, inRange, label }) {
   const S = 300;
   const C = S / 2;
-  const R = 132;
+  const R = 120;
 
   const dist = point ? Math.hypot(point.dx, point.dy) : 0;
   const view = Math.max(radius * 2.4, dist * 1.12);
@@ -17,7 +17,7 @@ export default function Radar({ radius, point, inRange, label }) {
 
   return (
     <svg className="radar" viewBox={`0 0 ${S} ${S}`} role="img" aria-label={label}>
-      {[0.33, 0.66, 1].map((f) => (
+      {[0.5, 1].map((f) => (
         <circle key={f} className="r-guide" cx={C} cy={C} r={R * f} />
       ))}
       <line className="r-guide" x1={C - R} y1={C} x2={C + R} y2={C} />
@@ -27,20 +27,20 @@ export default function Radar({ radius, point, inRange, label }) {
       </text>
 
       <circle className={`r-fence${tone}`} cx={C} cy={C} r={ring} />
-      <text className="r-ring" x={C} y={C - ring - 7} textAnchor="middle">
+      <text className="r-ring" x={C} y={C - ring - 8} textAnchor="middle">
         {radius} m
       </text>
 
       <path
         className="r-center"
-        d={`M ${C} ${C - 7} L ${C + 7} ${C} L ${C} ${C + 7} L ${C - 7} ${C} Z`}
+        d={`M ${C} ${C - 11} L ${C + 11} ${C} L ${C} ${C + 11} L ${C - 11} ${C} Z`}
       />
 
       {point && (
         <g>
           <line className="r-link" x1={C} y1={C} x2={ux} y2={uy} />
-          <circle className={`r-pulse${tone}`} cx={ux} cy={uy} r="7" />
-          <circle className={`r-user${tone}`} cx={ux} cy={uy} r="7" />
+          <circle className={`r-pulse${tone}`} cx={ux} cy={uy} r="11" />
+          <circle className={`r-user${tone}`} cx={ux} cy={uy} r="11" />
         </g>
       )}
     </svg>
