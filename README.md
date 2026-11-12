@@ -34,9 +34,42 @@ Setiap mengubah `Code.gs`, buat **New deployment / Manage deployments > New vers
 - Riwayat tampil 10 baris per halaman, dengan tombol Sebelumnya dan Berikutnya. Pilih tanggal untuk melihat hari lain.
 - Tombol **Excel** mengunduh `riwayat-presensi-yyyy-mm-dd.xlsx` berisi semua pegawai pada tanggal terpilih (bukan hanya halaman yang tampil): No, Nama, Jabatan, Mulai, Selesai, Durasi, Status. File dibuat di server Next.js memakai paket `exceljs`, jadi jalankan `npm install` setelah memperbarui proyek.
 
+## Presensi marbot masjid (halaman `/marbot`)
+
+Marbot presensi pada setiap sesi di sheet **JadwalMarbot**: 6 shift, 11 sesi, total 540 menit atau 9 jam. Lokasi dan radius memakai pengaturan yang sama dengan kajian (sheet Config).
+
+| Shift | Jam | Menit | Kegiatan | Keterangan |
+|---|---|---|---|---|
+| 1 | 04.30 - 05.20 | 50 | Shalat Shubuh | Persiapan, shalat dan perapihan |
+| 2 | 09.00 - 10.30 | 90 | Kajian | Fleksibel ke kajian Shubuh, pagi atau Maghrib |
+| 2 | 10.30 - 11.00 | 30 | Insidentil | Kegiatan insidentil baik perapihan atau pemeliharaan area masjid |
+| 3 | 11.10 - 12.00 | 50 | Kebersihan Siang | Persiapan siang, pasca tahfiz |
+| 3 | 12.00 - 12.50 | 50 | Shalat Zuhur | Persiapan, shalat dan perapihan (lalu Break) |
+| 4 | 14.20 - 15.10 | 50 | Kebersihan Sore | Persiapan TPA |
+| 4 | 15.10 - 16.00 | 50 | Shalat Ashar | Persiapan, shalat dan perapihan (lalu Break) |
+| 5 | 17.20 - 18.10 | 50 | Kebersihan Malam | Persiapan malam, pasca TPA |
+| 5 | 18.10 - 19.00 | 50 | Shalat Maghrib | Persiapan, shalat dan perapihan |
+| 5 | 19.00 - 19.50 | 50 | Shalat Isya | Persiapan, shalat dan perapihan (lalu Break) |
+| 6 | 22.00 - 22.20 | 20 | Pengecekan Akhir | Mematikan lampu dan elektronik lainnya dan menutup pintu dan akses lainnya |
+
+Sheet yang dibuat otomatis oleh `setup()`:
+
+- **Marbot**: `ID`, `Nama`, `PIN`. Ganti dua baris contoh dengan data asli.
+- **JadwalMarbot**: `No`, `Shift`, `Kegiatan`, `Mulai`, `Selesai`, `Durasi (menit)`, `Keterangan`, `Break`. Tulis jam sebagai teks, mis. `04:30`. Durasi dihitung otomatis. Isi kolom `Break` (mis. `Break`) bila setelah sesi itu ada waktu istirahat. Kolom dibaca berdasarkan nama header. Jadwal dapat diubah kapan saja tanpa deploy ulang.
+- **PresensiMarbot**: hasil presensi (waktu, sesi, kegiatan, status, menit dikreditkan, koordinat, jarak, shift).
+
+Aturan presensi (server yang menentukan sesi dari jam WITA, bukan pilihan marbot):
+
+- Sesi dibuka `marbotBukaSebelumMenit` (default 15) menit sebelum jam mulai dan tertutup saat jam selesai.
+- Hadir sampai `marbotToleransiMenit` (default 10) menit setelah jam mulai dinilai **Tepat waktu** dan dikreditkan sebesar durasi penuh sesi.
+- Lebih dari itu dinilai **Terlambat** dan hanya dikreditkan sisa menit sampai sesi berakhir.
+- Satu sesi hanya bisa dipresensi satu kali per marbot per hari. Bila dua sesi bersambung (mis. 11.10-12.00 dan 12.00-12.50), marbot presensi sekali di tiap sesi.
+- Riwayat menampilkan semua marbot terdaftar, termasuk yang belum hadir, 10 baris per halaman. Tombol **Excel** menghasilkan dua sheet: Ringkasan (per marbot) dan Detail (per sesi, lengkap dengan shift dan kegiatan).
+
 ## Memperbarui dari versi sebelumnya
 
-1. Ganti isi Apps Script dengan `gas/Code.gs` terbaru, lalu jalankan `setup()` sekali lagi. Fungsi ini menambah kunci Config yang baru dan mengubah `maxAkurasi` dari 50 menjadi 100 bila masih nilai lama. Data yang sudah ada tidak dihapus.
+1. Ganti isi Apps Script dengan `gas/Code.gs` terbaru, lalu jalankan `setup()` sekali lagi. Fungsi ini menambah kunci Config baru, membuat sheet Marbot, JadwalMarbot, dan PresensiMarbot, serta mengubah `maxAkurasi` dari 50 menjadi 100 bila masih nilai lama. Data yang sudah ada tidak dihapus.
+   Bila sheet **JadwalMarbot** masih berformat lama (kolom `Kelompok`), `setup()` menulis ulang isinya dengan jadwal shift terbaru di atas. Perubahan jadwal yang pernah Anda buat manual di sheet itu akan tertimpa, jadi catat dulu bila perlu. Sheet **PresensiMarbot** hanya diubah header-nya (kolom G menjadi `Kegiatan`, kolom O `Shift` ditambahkan); data presensi lama tetap ada.
 2. **Deploy > Manage deployments > Edit > New version** agar kode baru aktif. URL tidak berubah.
 3. **Zona waktu WITA**: di Apps Script buka **Project Settings (ikon roda gigi)**, centang **Show "appsscript.json" manifest file in editor**, lalu pastikan `"timeZone": "Asia/Makassar"` (contoh ada di `gas/appsscript.json`). Fungsi `setup()` juga menyetel zona waktu spreadsheet ke WITA. Cek manual di spreadsheet: **File > Settings > Time zone** harus `(GMT+08:00) Makassar`.
 4. Ganti `public/logo.png` dan `app/icon.png` bila logo berubah.

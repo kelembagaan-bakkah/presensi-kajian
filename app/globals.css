@@ -42,7 +42,7 @@ body {
 }
 .hero-inner {
   max-width: 980px; margin: 0 auto;
-  padding: 12px 14px 38px;
+  padding: 12px 14px 10px;
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
 }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -231,7 +231,8 @@ footer { max-width: 980px; margin: 0 auto; padding: 0 14px 20px; text-align: cen
 /* ---------- Layar lebih lebar ---------- */
 @media (min-width: 640px) {
   body { font-size: 16px; }
-  .hero-inner { padding: 18px 20px 48px; }
+  .hero-inner { padding: 18px 20px 12px; }
+  .tabs { padding: 0 20px 44px; }
   .badge { width: 60px; height: 60px; }
   .badge img { width: 50px; height: 50px; }
   h1 { font-size: 1.45rem; }
@@ -256,3 +257,64 @@ footer { max-width: 980px; margin: 0 auto; padding: 0 14px 20px; text-align: cen
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- Tab layanan di header ---------- */
+.tabs { max-width: 980px; margin: 0 auto; padding: 0 14px 36px; display: flex; gap: 6px; }
+.tabs a {
+  padding: 5px 12px; border-radius: 999px; font-size: 0.8rem; font-weight: 600;
+  color: #e3f8ea; text-decoration: none; border: 1px solid rgba(255, 255, 255, 0.4);
+}
+.tabs a:hover { background: rgba(255, 255, 255, 0.14); }
+.tabs a.on { background: #fff; color: var(--green-deep); border-color: #fff; }
+.tabs a:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+
+/* ---------- Presensi marbot ---------- */
+.sesi-now {
+  display: grid; gap: 1px; padding: 8px 10px; border-radius: 10px;
+  background: var(--green-soft); color: var(--green-deep); font-size: 0.82rem; line-height: 1.35;
+}
+.sesi-now small { font-size: 0.7rem; font-weight: 600; opacity: 0.85; }
+.sesi-now strong { font-family: var(--font-display), Georgia, serif; font-size: 1.05rem; line-height: 1.2; }
+.sesi-now.late { background: var(--warn-soft); color: var(--warn); }
+.sesi-now.none { background: #ecf3ee; color: var(--muted); }
+
+.prog-label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; font-size: 0.76rem; color: var(--muted); }
+.prog-label span:first-child { font-weight: 600; color: var(--ink); font-size: 0.82rem; }
+.progress { height: 6px; margin-bottom: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--logo); transition: width 0.3s; }
+
+.sesi-now .sesi-ket { margin-top: 2px; font-size: 0.76rem; opacity: 0.9; }
+
+/* Jadwal marbot per shift */
+.jadwal { list-style: none; padding: 0; display: grid; gap: 4px; }
+.jd {
+  display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 10px; border: 1.5px solid var(--line); background: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.jd-shift {
+  width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 0.72rem; font-weight: 700; color: var(--green-deep);
+}
+.jd.awal .jd-shift { background: var(--green-soft); }
+.jd-main { display: grid; min-width: 0; line-height: 1.25; }
+.jd-main strong { font-size: 0.84rem; }
+.jd-main small { font-size: 0.7rem; color: var(--muted); }
+.jd-stat { font-size: 0.72rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.jd.hadir { background: var(--green); border-color: var(--green); color: #fff; }
+.jd.hadir .jd-main small, .jd.hadir .jd-stat { color: #e3f8ea; }
+.jd.hadir.awal .jd-shift { background: rgba(255, 255, 255, 0.22); color: #fff; }
+.jd.telat { background: var(--warn-soft); border-color: var(--warn-dot); color: var(--warn); }
+.jd.telat .jd-main small, .jd.telat .jd-stat { color: var(--warn); }
+.jd.lewat { background: #edf3ef; border-color: transparent; color: var(--muted); }
+.jd.aktif { border-color: var(--green); box-shadow: 0 0 0 2px rgba(0, 180, 88, 0.28); }
+.jd-break {
+  padding: 2px 8px; border-radius: 8px; background: #edf3ef; color: var(--muted);
+  font-size: 0.66rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; text-align: center;
+}
+
+.dots { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 3px; }
+.dots i { width: 10px; height: 10px; border-radius: 50%; background: #dbe7df; }
+.dots i.h { background: var(--green); }
+.dots i.t { background: var(--warn-dot); }
+.dots i.baru { margin-left: 5px; }

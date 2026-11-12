@@ -1,4 +1,4 @@
-import writeExcelFile from "write-excel-file/node";
+import ExcelJS from "exceljs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,44 +45,45 @@ export async function GET(request) {
     timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric",
   }).format(new Date(`${tanggal}T00:00:00Z`));
 
-  const border = { bottomBorderStyle: "thin", bottomBorderColor: "#C8E2D2" };
-  const cell = (value, left = false) => ({
-    value: String(value),
-    ...border,
-    align: left ? "left" : "center",
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Presensi Kajian Pegawai";
+  const ws = wb.addWorksheet("Riwayat", { views: [{ state: "frozen", ySplit: 4 }] });
+
+  ws.mergeCells("A1:G1");
+  ws.getCell("A1").value = "Riwayat presensi kajian pegawai";
+  ws.getCell("A1").font = { bold: true, size: 14, color: { argb: "FF052E1B" } };
+  ws.mergeCells("A2:G2");
+  ws.getCell("A2").value = `${label} (WITA)`;
+  ws.getCell("A2").font = { color: { argb: "FF46604F" } };
+
+  const head = ws.getRow(4);
+  head.values = ["No", "Nama", "Jabatan", "Mulai", "Selesai", "Durasi", "Status"];
+  head.eachCell((c) => {
+    c.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF00803E" } };
+    c.alignment = { vertical: "middle", horizontal: "center" };
+  });
+  head.height = 22;
+
+  data.rows.forEach((r, i) => {
+    const row = ws.addRow([
+      i + 1,
+      r.nama,
+      r.jabatan || "-",
+      r.mulai || "-",
+      r.selesai || "-",
+      durasi(r.mulai, r.selesai),
+      r.selesai ? "Selesai" : "Belum selesai",
+    ]);
+    row.eachCell((c, col) => {
+      c.border = { bottom: { style: "thin", color: { argb: "FFC8E2D2" } } };
+      if (col !== 2 && col !== 3) c.alignment = { horizontal: "center" };
+    });
   });
 
-  const head = ["No", "Nama", "Jabatan", "Mulai", "Selesai", "Durasi", "Status"].map((value) => ({
-    value,
-    fontWeight: "bold",
-    textColor: "#FFFFFF",
-    backgroundColor: "#00803E",
-    align: "center",
-    alignVertical: "center",
-    height: 22,
-  }));
+  [6, 30, 22, 10, 10, 12, 16].forEach((w, i) => (ws.getColumn(i + 1).width = w));
 
-  const sheetData = [
-    [{ value: "Riwayat presensi kajian pegawai", fontWeight: "bold", fontSize: 14, textColor: "#052E1B", columnSpan: 7 }, null, null, null, null, null, null],
-    [{ value: `${label} (WITA)`, textColor: "#46604F", columnSpan: 7 }, null, null, null, null, null, null],
-    [],
-    head,
-    ...data.rows.map((r, i) => [
-      { value: i + 1, ...border, align: "center" },
-      cell(r.nama, true),
-      cell(r.jabatan || "-", true),
-      cell(r.mulai || "-"),
-      cell(r.selesai || "-"),
-      cell(durasi(r.mulai, r.selesai)),
-      cell(r.selesai ? "Selesai" : "Belum selesai"),
-    ]),
-  ];
-
-  const buffer = await writeExcelFile(sheetData, {
-    sheet: "Riwayat",
-    stickyRowsCount: 4,
-    columns: [6, 30, 22, 10, 10, 12, 16].map((width) => ({ width })),
-  }).toBuffer();
+  const buffer = await wb.xlsx.writeBuffer();
   return new Response(buffer, {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

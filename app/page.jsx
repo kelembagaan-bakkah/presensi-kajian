@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Radar from "../components/Radar";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Hero from "../components/Hero";
+import LokasiCard from "../components/LokasiCard";
 import Riwayat from "../components/Riwayat";
-import { haversine, offsetMeters } from "../lib/geo";
+import useLokasi, { formatDistance } from "../lib/useLokasi";
+import { fmtDate, fmtIso, fmtTime } from "../lib/waktu";
 
 const JENIS = [
   { value: "Mulai", hint: "Awal kajian" },
@@ -11,66 +13,24 @@ const JENIS = [
 ];
 
 const STORAGE_KEY = "presensi-kajian:pegawai";
-const SAMPLE_WINDOW_MS = 15000; // pembacaan GPS yang digabung
 const POLL_MS = 60000; // segarkan riwayat otomatis
-
-const TZ = "Asia/Makassar";
-const fmtTime = new Intl.DateTimeFormat("id-ID", {
-  timeZone: TZ, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
-});
-const fmtDate = new Intl.DateTimeFormat("id-ID", {
-  timeZone: TZ, weekday: "short", day: "numeric", month: "short", year: "numeric",
-});
-const fmtIso = new Intl.DateTimeFormat("en-CA", { timeZone: TZ }); // yyyy-mm-dd
-
-function geoMessage(err) {
-  if (err.code === 1)
-    return "Izin lokasi ditolak. Aktifkan izin lokasi untuk situs ini di pengaturan browser, lalu cari lokasi lagi.";
-  if (err.code === 2) return "Lokasi tidak tersedia. Pastikan GPS perangkat menyala.";
-  return "Pencarian lokasi terlalu lama. Coba lagi di area terbuka.";
-}
-
-function formatDistance(m) {
-  return m < 10 ? m.toFixed(1).replace(".", ",") : String(Math.round(m));
-}
-
-/**
- * Gabungkan beberapa pembacaan GPS terbaru: titik dirata-rata dengan bobot 1/akurasi²,
- * sehingga pembacaan kasar (Wi-Fi/jaringan) hampir tidak berpengaruh.
- * Akurasi yang dilaporkan = akurasi terbaik (konservatif).
- */
-function fuse(samples) {
-  const best = samples.reduce((a, b) => (b.acc < a.acc ? b : a));
-  let w = 0, lat = 0, lng = 0;
-  for (const s of samples) {
-    if (s.acc > best.acc * 2) continue;
-    const k = 1 / (s.acc * s.acc);
-    w += k; lat += s.lat * k; lng += s.lng * k;
-  }
-  return { lat: lat / w, lng: lng / w, acc: best.acc };
-}
-
-function accLabel(acc, max) {
-  if (acc <= 20) return "baik";
-  if (acc <= max) return "cukup";
-  return "lemah";
-}
 
 export default function Page() {
   const [boot, setBoot] = useState({ state: "loading", config: null, pegawai: [], error: "" });
   const [pegawaiId, setPegawaiId] = useState("");
   const [pin, setPin] = useState("");
   const [jenis, setJenis] = useState("Mulai");
-  const [geo, setGeo] = useState({ state: "loading", pos: null, error: "" });
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState(null);
   const [now, setNow] = useState(null);
   const [today, setToday] = useState("");
   const [tanggal, setTanggal] = useState("");
   const [riwayat, setRiwayat] = useState({ state: "loading", rows: [], error: "" });
-  const watchRef = useRef(null);
-  const samplesRef = useRef([]);
   const reqRef = useRef(0);
+
+  const cfg = boot.config;
+  const lokasi = useLokasi(cfg, boot.state === "error");
+  const { geo, metrics, inRange, accOk } = lokasi;
 
   /* Jam berjalan dan tanggal hari ini (WITA), diisi setelah mount */
   useEffect(() => {
@@ -131,78 +91,6 @@ export default function Page() {
     return () => clearInterval(t);
   }, [tanggal, loadRiwayat]);
 
-  /* Pantau GPS dan gabungkan pembacaan terbaru */
-  const startWatch = useCallback(() => {
-    if (watchRef.current !== null) navigator.geolocation?.clearWatch(watchRef.current);
-    samplesRef.current = [];
-    if (!("geolocation" in navigator)) {
-      setGeo({ state: "error", pos: null, error: "Perangkat ini tidak mendukung GPS." });
-      return;
-    }
-    setGeo({ state: "loading", pos: null, error: "" });
-    watchRef.current = navigator.geolocation.watchPosition(
-      (p) => {
-        const t = Date.now();
-        samplesRef.current = [
-          ...samplesRef.current.filter((s) => t - s.t <= SAMPLE_WINDOW_MS),
-          { t, lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.max(p.coords.accuracy, 1) },
-        ];
-        setGeo({ state: "ok", pos: fuse(samplesRef.current), error: "" });
-      },
-      (err) =>
-        setGeo((g) =>
-          g.pos && err.code === 3
-            ? g
-            : { state: err.code === 1 ? "denied" : "error", pos: null, error: geoMessage(err) }
-        ),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 }
-    );
-  }, []);
-
-  useEffect(() => {
-    startWatch();
-    return () => {
-      if (watchRef.current !== null) navigator.geolocation?.clearWatch(watchRef.current);
-    };
-  }, [startWatch]);
-
-  const cfg = boot.config;
-  const limit = cfg ? cfg.radiusMeter + (cfg.toleransiMeter || 0) : 20;
-
-  const metrics = useMemo(() => {
-    if (!cfg || !geo.pos) return null;
-    const { lat, lng, acc } = geo.pos;
-    return {
-      dist: haversine(cfg.latitude, cfg.longitude, lat, lng),
-      ...offsetMeters(cfg.latitude, cfg.longitude, lat, lng),
-      acc,
-    };
-  }, [cfg, geo.pos]);
-
-  const inRange = !!metrics && metrics.dist <= limit;
-  const accOk = !!metrics && metrics.acc <= cfg.maxAkurasi;
-
-  const status = (() => {
-    if (boot.state === "error") return { tone: "bad", text: "Data kajian belum termuat." };
-    if (geo.state === "denied" || geo.state === "error") return { tone: "bad", text: geo.error };
-    if (!metrics) return { tone: "idle", text: "Mencari lokasi Anda…" };
-    if (!accOk) {
-      const tip =
-        metrics.acc > 150
-          ? "Perangkat ini tampaknya memakai lokasi dari Wi-Fi atau jaringan. Gunakan HP, aktifkan GPS dengan akurasi tinggi, dan izinkan lokasi presisi untuk browser."
-          : "Keluar ke area terbuka atau dekat jendela, lalu tunggu 10 sampai 20 detik.";
-      return {
-        tone: "warn",
-        text: `Akurasi GPS ±${Math.round(metrics.acc)} m belum cukup (maksimal ${cfg.maxAkurasi} m). ${tip}`,
-      };
-    }
-    if (inRange) return { tone: "ok", text: "Anda berada di dalam area kajian." };
-    return {
-      tone: "warn",
-      text: `Mendekatlah sekitar ${Math.ceil(metrics.dist - limit)} m lagi ke titik kajian.`,
-    };
-  })();
-
   const blocker = !pegawaiId
     ? "Pilih nama Anda untuk melanjutkan."
     : pin.length < 4
@@ -262,58 +150,19 @@ export default function Page() {
     } catch {}
   }
 
-  const radarLabel = metrics
-    ? `Posisi Anda ${Math.round(metrics.dist)} meter dari titik kajian, batas ${limit} meter.`
-    : "Menunggu posisi Anda.";
-
   return (
     <main>
-      <header className="hero">
-        <div className="hero-inner">
-          <div className="brand">
-            <span className="badge">
-              <img src="/logo.png" alt="Logo Yayasan Sa'adah Martapura" width="40" height="40" />
-            </span>
-            <div>
-              <h1>Presensi kajian pegawai</h1>
-              {cfg?.namaLokasi && <p className="place">{cfg.namaLokasi}</p>}
-            </div>
-          </div>
-          <div className="clock" aria-hidden={!now}>
-            <time>{now ? fmtTime.format(now) : "--.--.--"}</time>
-            <span>{now ? `${fmtDate.format(now)}, WITA` : "\u00A0"}</span>
-          </div>
-        </div>
-      </header>
+      <Hero
+        title="Presensi kajian pegawai"
+        place={cfg?.namaLokasi}
+        time={now ? fmtTime.format(now) : "--.--.--"}
+        date={now ? `${fmtDate.format(now)}, WITA` : "\u00A0"}
+        active="kajian"
+      />
 
       <div className="grid">
-        {/* Lokasi dan jarak */}
-        <section className="panel loc" aria-live="polite">
-          <Radar radius={limit} point={metrics} inRange={inRange} label={radarLabel} />
-          <div className="readout">
-            <div className="big">
-              {metrics ? formatDistance(metrics.dist) : "–"}
-              <span> m</span>
-            </div>
-            <p className="caption">
-              {cfg ? `dari titik kajian, batas ${limit} m` : "dari titik kajian"}
-            </p>
-            {metrics && (
-              <p className="acc">
-                Akurasi GPS ±{Math.round(metrics.acc)} m ({accLabel(metrics.acc, cfg.maxAkurasi)})
-              </p>
-            )}
-            <button type="button" className="ghost small" onClick={startWatch}>
-              {geo.state === "denied" || geo.state === "error" ? "Cari lokasi lagi" : "Perbarui lokasi"}
-            </button>
-          </div>
-          <p className={`status ${status.tone}`}>
-            <i aria-hidden="true" />
-            {status.text}
-          </p>
-        </section>
+        <LokasiCard cfg={cfg} lokasi={lokasi} />
 
-        {/* Formulir */}
         <form className="panel form" onSubmit={onSubmit} noValidate>
           <fieldset className="field">
             <legend>Jenis presensi</legend>
