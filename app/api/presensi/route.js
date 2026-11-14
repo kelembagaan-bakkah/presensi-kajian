@@ -21,7 +21,7 @@ async function readGas(res) {
   }
 }
 
-/** GET /api/presensi                       -> konfigurasi lokasi + daftar pegawai
+/** GET /api/presensi                       -> konfigurasi lokasi
  *  GET /api/presensi?action=riwayat&tanggal=yyyy-mm-dd -> riwayat presensi per tanggal */
 export async function GET(request) {
   if (!GAS_URL || !API_KEY) return misconfigured();

@@ -76,15 +76,8 @@ function doGet(e) {
     const p = (e && e.parameter) || {};
     assertKey_(p.key);
 
-    if (p.action === 'init') {
-      const rows = sheet_(SHEET.PEGAWAI).getDataRange().getValues().slice(1);
-      const pegawai = rows
-        .filter(function (r) { return r[0] && r[1]; })
-        .map(function (r) {
-          return { id: String(r[0]).trim(), nama: String(r[1]).trim(), jabatan: String(r[2] || '').trim() };
-        });
-      return json_({ ok: true, config: readConfig_(), pegawai: pegawai });
-    }
+    // Daftar nama pegawai tidak dikirim ke browser. Nama dicari lewat PIN (aksi cari_pegawai).
+    if (p.action === 'init') return json_({ ok: true, config: readConfig_() });
 
     if (p.action === 'riwayat') {
       const tanggal = /^\d{4}-\d{2}-\d{2}$/.test(p.tanggal || '')
@@ -115,6 +108,7 @@ function doPost(e) {
     const b = JSON.parse(e.postData.contents);
     assertKey_(b.key);
     if (b.action === 'marbot_presensi') return json_(marbotPresensi_(b));
+    if (b.action === 'cari_pegawai') return json_(cariPegawai_(b));
     if (b.action !== 'presensi') throw new Error('Aksi tidak dikenal.');
 
     const jenis = String(b.jenis);
@@ -238,6 +232,39 @@ function readConfig_() {
 function num_(v, def) {
   const n = Number(v);
   return v === '' || v === null || v === undefined || !isFinite(n) ? def : n;
+}
+
+/**
+ * Cari pegawai berdasarkan PIN. Hanya nama yang PIN-nya cocok yang dikembalikan (biasanya satu orang).
+ * Percobaan PIN yang tidak cocok dibatasi per klien (IP): 10 kali per 10 menit.
+ * Hanya PIN dengan panjang yang dipakai pegawai yang dihitung sebagai percobaan,
+ * sehingga ketikan setengah jalan (mis. 4 dari 6 angka) tidak menghabiskan jatah.
+ */
+function cariPegawai_(b) {
+  const pin = String(b.pin || '').trim();
+  if (!/^\d{4,8}$/.test(pin)) throw new Error('PIN harus 4 sampai 8 angka.');
+
+  const client = String(b.client || 'anon').replace(/[^0-9a-zA-Z.:_-]/g, '').slice(0, 64) || 'anon';
+  const cache = CacheService.getScriptCache();
+  const failKey = 'failcari_' + client;
+  const fails = Number(cache.get(failKey) || 0);
+  if (fails >= 10) throw new Error('Terlalu banyak percobaan PIN. Coba lagi dalam 10 menit.');
+
+  const rows = sheet_(SHEET.PEGAWAI).getDataRange().getValues().slice(1)
+    .filter(function (r) { return r[0] && r[1]; })
+    .map(function (r) {
+      return { id: String(r[0]).trim(), nama: String(r[1]).trim(), jabatan: String(r[2] || '').trim(), pin: String(r[3] || '').trim() };
+    });
+
+  const cocok = rows.filter(function (r) { return r.pin === pin; });
+  if (!cocok.length) {
+    if (rows.some(function (r) { return r.pin.length === pin.length; })) cache.put(failKey, String(fails + 1), 600);
+    return { ok: true, pegawai: [] };
+  }
+  return {
+    ok: true,
+    pegawai: cocok.map(function (r) { return { id: r.id, nama: r.nama, jabatan: r.jabatan }; }),
+  };
 }
 
 function findPegawai_(id) {

@@ -155,6 +155,12 @@ select {
 }
 select:focus-visible, input:focus-visible { outline: 3px solid var(--ink); outline-offset: 1px; border-color: var(--green); }
 select:disabled { background-color: #f1f6f3; color: var(--muted); }
+.field > .label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 0.82rem; }
+.nama-pegawai {
+  display: flex; align-items: center; min-height: 44px; padding: 8px 12px;
+  font-weight: 600; color: var(--green-deep);
+  background: var(--green-soft); border: 1.5px solid var(--green); border-radius: 10px;
+}
 
 button, a.ghost { font: inherit; cursor: pointer; }
 .primary {

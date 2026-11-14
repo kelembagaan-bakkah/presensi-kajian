@@ -14,11 +14,13 @@ const JENIS = [
 
 const STORAGE_KEY = "presensi-kajian:pegawai";
 const POLL_MS = 60000; // segarkan riwayat otomatis
+const CARI_DELAY_MS = 500; // jeda setelah berhenti mengetik PIN sebelum mencari nama
 
 export default function Page() {
-  const [boot, setBoot] = useState({ state: "loading", config: null, pegawai: [], error: "" });
+  const [boot, setBoot] = useState({ state: "loading", config: null, error: "" });
   const [pegawaiId, setPegawaiId] = useState("");
   const [pin, setPin] = useState("");
+  const [cari, setCari] = useState({ state: "idle", pegawai: [], error: "" }); // pencarian nama berdasarkan PIN
   const [jenis, setJenis] = useState("Mulai");
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState(null);
@@ -27,6 +29,7 @@ export default function Page() {
   const [tanggal, setTanggal] = useState("");
   const [riwayat, setRiwayat] = useState({ state: "loading", rows: [], error: "" });
   const reqRef = useRef(0);
+  const cariReq = useRef(0);
 
   const cfg = boot.config;
   const lokasi = useLokasi(cfg, boot.state === "error");
@@ -43,26 +46,57 @@ export default function Page() {
     return () => clearInterval(timer);
   }, []);
 
-  /* Konfigurasi lokasi dan daftar pegawai */
+  /* Konfigurasi lokasi */
   const loadBoot = useCallback(async () => {
     setBoot((b) => ({ ...b, state: "loading", error: "" }));
     try {
       const res = await fetch("/api/presensi", { cache: "no-store" });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "Data kajian belum bisa dimuat.");
-      setBoot({ state: "ready", config: data.config, pegawai: data.pegawai, error: "" });
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved && data.pegawai.some((p) => p.id === saved)) setPegawaiId(saved);
-      } catch {}
+      setBoot({ state: "ready", config: data.config, error: "" });
     } catch (e) {
-      setBoot({ state: "error", config: null, pegawai: [], error: e.message });
+      setBoot({ state: "error", config: null, error: e.message });
     }
   }, []);
 
   useEffect(() => {
     loadBoot();
   }, [loadBoot]);
+
+  /* Cari nama sesuai PIN. Hanya nama dengan PIN yang cocok yang diterima dari server. */
+  useEffect(() => {
+    const id = ++cariReq.current;
+    setPegawaiId("");
+    if (pin.length < 4) {
+      setCari({ state: "idle", pegawai: [], error: "" });
+      return;
+    }
+    setCari({ state: "loading", pegawai: [], error: "" });
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/presensi/cari", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Nama belum bisa dicari.");
+        if (id !== cariReq.current) return;
+        const list = data.pegawai || [];
+        setCari({ state: list.length ? "found" : "none", pegawai: list, error: "" });
+        if (list.length === 1) setPegawaiId(list[0].id);
+        else if (list.length > 1) {
+          try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved && list.some((p) => p.id === saved)) setPegawaiId(saved);
+          } catch {}
+        }
+      } catch (e) {
+        if (id === cariReq.current) setCari({ state: "error", pegawai: [], error: e.message });
+      }
+    }, CARI_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [pin]);
 
   /* Riwayat presensi */
   const loadRiwayat = useCallback(async (tgl, silent = false) => {
@@ -91,10 +125,16 @@ export default function Page() {
     return () => clearInterval(t);
   }, [tanggal, loadRiwayat]);
 
-  const blocker = !pegawaiId
-    ? "Pilih nama Anda untuk melanjutkan."
-    : pin.length < 4
+  const blocker = pin.length < 4
     ? "Masukkan PIN Anda."
+    : cari.state === "loading"
+    ? "Mencari nama sesuai PIN…"
+    : cari.state === "none"
+    ? "PIN tidak ditemukan."
+    : cari.state === "error"
+    ? cari.error
+    : !pegawaiId
+    ? "Pilih nama Anda untuk melanjutkan."
     : !metrics
     ? "Menunggu lokasi Anda."
     : !accOk
@@ -190,26 +230,6 @@ export default function Page() {
           </fieldset>
 
           <div className="field">
-            <label htmlFor="pegawai">Nama pegawai</label>
-            <select
-              id="pegawai"
-              value={pegawaiId}
-              onChange={(e) => onPickPegawai(e.target.value)}
-              disabled={boot.state !== "ready"}
-            >
-              <option value="">
-                {boot.state === "loading" ? "Memuat daftar pegawai…" : "Pilih nama Anda"}
-              </option>
-              {boot.pegawai.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nama}
-                  {p.jabatan ? ` (${p.jabatan})` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field">
             <label htmlFor="pin">PIN</label>
             <input
               id="pin"
@@ -218,10 +238,40 @@ export default function Page() {
               autoComplete="off"
               maxLength={8}
               value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+              onChange={(e) => {
+                setPin(e.target.value.replace(/\D/g, ""));
+                setNotice(null);
+              }}
               placeholder="Minimal 4 angka"
             />
           </div>
+
+          {cari.state === "found" && (
+            <div className="field">
+              {cari.pegawai.length === 1 ? (
+                <>
+                  <span className="label" id="pegawai-label">Nama pegawai</span>
+                  <output className="nama-pegawai" aria-labelledby="pegawai-label">
+                    {cari.pegawai[0].nama}
+                    {cari.pegawai[0].jabatan ? ` (${cari.pegawai[0].jabatan})` : ""}
+                  </output>
+                </>
+              ) : (
+                <>
+                  <label htmlFor="pegawai">Nama pegawai</label>
+                  <select id="pegawai" value={pegawaiId} onChange={(e) => onPickPegawai(e.target.value)}>
+                    <option value="">Pilih nama Anda</option>
+                    {cari.pegawai.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nama}
+                        {p.jabatan ? ` (${p.jabatan})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+            </div>
+          )}
 
           <button type="submit" className="primary" disabled={!canSubmit}>
             {sending ? "Mencatat…" : `Catat presensi ${jenis.toLowerCase()}`}

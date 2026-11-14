@@ -1,6 +1,6 @@
 # Presensi Kajian Pegawai
 
-Web app presensi kajian berbasis lokasi. Pegawai memilih **Mulai** atau **Selesai**, lalu presensi hanya bisa dicatat bila posisi GPS berada dalam radius **20 m** dari **Masjid Syarifah Shalihah** (-3.4331621, 114.845775). Semua data tersimpan di Google Sheets.
+Web app presensi kajian berbasis lokasi. Pegawai memilih **Mulai** atau **Selesai**, mengisi **PIN** (nama yang sesuai PIN tampil otomatis, nama pegawai lain tidak ditampilkan), lalu presensi hanya bisa dicatat bila posisi GPS berada dalam radius **20 m** dari **Masjid Syarifah Shalihah** (-3.4331621, 114.845775). Semua data tersimpan di Google Sheets.
 
 **Stack:** Next.js (App Router) + Google Apps Script + Google Sheets, deploy di Vercel.
 
@@ -26,7 +26,7 @@ Setiap mengubah `Code.gs`, buat **New deployment / Manage deployments > New vers
 ## 2. Isi data di spreadsheet
 
 - **Config**: koordinat, `radiusMeter` (default 20), `maxAkurasi` (default 100 m), dan `toleransiMeter` (default 0). Ubah di sini tanpa deploy ulang.
-- **Pegawai**: kolom `ID`, `Nama`, `Jabatan`, `PIN`. Ganti dua baris contoh dengan data asli. Kolom PIN berformat teks.
+- **Pegawai**: kolom `ID`, `Nama`, `Jabatan`, `PIN`. Ganti dua baris contoh dengan data asli. Kolom PIN berformat teks. PIN sebaiknya unik per pegawai; bila dua pegawai memakai PIN yang sama, setelah PIN diisi muncul pilihan nama yang hanya berisi pegawai dengan PIN itu.
 - **Presensi**: terisi otomatis (Timestamp, Tanggal, Jam, pegawai, Jenis, koordinat, akurasi, jarak, status). Sheet ini juga menjadi sumber **Riwayat presensi** di bagian bawah halaman.
 
 ## Riwayat dan export Excel
@@ -66,11 +66,19 @@ Aturan presensi (server yang menentukan sesi dari jam WITA, bukan pilihan marbot
 - Satu sesi hanya bisa dipresensi satu kali per marbot per hari. Bila dua sesi bersambung (mis. 11.10-12.00 dan 12.00-12.50), marbot presensi sekali di tiap sesi.
 - Riwayat menampilkan semua marbot terdaftar, termasuk yang belum hadir, 10 baris per halaman. Tombol **Excel** menghasilkan dua sheet: Ringkasan (per marbot) dan Detail (per sesi, lengkap dengan shift dan kegiatan).
 
+## Alur presensi kajian
+
+1. Pilih jenis presensi (Mulai atau Selesai).
+2. Isi PIN. Setelah berhenti mengetik, aplikasi mencari nama yang PIN-nya cocok dan menampilkannya. Daftar nama semua pegawai tidak lagi dikirim ke browser.
+3. Pastikan lokasi sesuai, lalu klik **Catat presensi**. Server tetap memeriksa ulang PIN, jarak, dan duplikat.
+
+Pencarian nama dibatasi 10 percobaan PIN yang tidak cocok per 10 menit per alamat IP, supaya PIN tidak bisa ditebak untuk mengetahui nama. Hanya PIN dengan panjang yang dipakai pegawai yang dihitung sebagai percobaan. Bila banyak pegawai memakai Wi-Fi yang sama, batas ini dihitung bersama untuk IP tersebut.
+
 ## Memperbarui dari versi sebelumnya
 
 1. Ganti isi Apps Script dengan `gas/Code.gs` terbaru, lalu jalankan `setup()` sekali lagi. Fungsi ini menambah kunci Config baru, membuat sheet Marbot, JadwalMarbot, dan PresensiMarbot, serta mengubah `maxAkurasi` dari 50 menjadi 100 bila masih nilai lama. Data yang sudah ada tidak dihapus.
    Bila sheet **JadwalMarbot** masih berformat lama (kolom `Kelompok`), `setup()` menulis ulang isinya dengan jadwal shift terbaru di atas. Perubahan jadwal yang pernah Anda buat manual di sheet itu akan tertimpa, jadi catat dulu bila perlu. Sheet **PresensiMarbot** hanya diubah header-nya (kolom G menjadi `Kegiatan`, kolom O `Shift` ditambahkan); data presensi lama tetap ada.
-2. **Deploy > Manage deployments > Edit > New version** agar kode baru aktif. URL tidak berubah.
+2. **Deploy > Manage deployments > Edit > New version** agar kode baru aktif. URL tidak berubah. Lakukan langkah 1 dan 2 **sebelum** men-deploy Next.js, karena halaman kajian yang baru memakai aksi `cari_pegawai` di Apps Script.
 3. **Zona waktu WITA**: di Apps Script buka **Project Settings (ikon roda gigi)**, centang **Show "appsscript.json" manifest file in editor**, lalu pastikan `"timeZone": "Asia/Makassar"` (contoh ada di `gas/appsscript.json`). Fungsi `setup()` juga menyetel zona waktu spreadsheet ke WITA. Cek manual di spreadsheet: **File > Settings > Time zone** harus `(GMT+08:00) Makassar`.
 4. Ganti `public/logo.png` dan `app/icon.png` bila logo berubah.
 
