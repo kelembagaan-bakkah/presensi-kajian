@@ -242,7 +242,7 @@ export default function Page() {
                 setPin(e.target.value.replace(/\D/g, ""));
                 setNotice(null);
               }}
-              placeholder="Minimal 4 angka"
+              placeholder="Masukan 6 Digit Pertama ID Pegawai"
             />
           </div>
 
