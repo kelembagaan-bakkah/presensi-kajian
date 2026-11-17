@@ -16,6 +16,13 @@ function styleHeader(row) {
   row.height = 28;
 }
 
+function note(ws, cols, text) {
+  if (!text) return;
+  ws.mergeCells(3, 1, 3, cols);
+  ws.getCell(3, 1).value = text;
+  ws.getCell(3, 1).font = { italic: true, size: 10, color: { argb: "FF46604F" } };
+}
+
 function title(ws, cols, text, sub) {
   ws.mergeCells(1, 1, 1, cols);
   ws.getCell(1, 1).value = text;
@@ -43,8 +50,13 @@ export async function GET(request) {
     timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric",
   }).format(new Date(`${tanggal}T00:00:00Z`));
   const sub = `${label} (WITA)`;
-  const { jadwal, rows, totalMenit } = data;
+  const { jadwal, rows, totalMenit, jadwalMenit } = data;
   const byKey = Object.fromEntries(jadwal.map((s) => [s.key, s]));
+  const jamTxt = (m) => `${Number.isInteger(m / 60) ? m / 60 : (m / 60).toFixed(1).replace(".", ",")} jam`;
+  const catatan =
+    jadwalMenit > totalMenit
+      ? `Jadwal ${jamTxt(jadwalMenit)}; yang dihitung maksimal ${jamTxt(totalMenit)} per hari, kelebihan tidak dihitung.`
+      : "";
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "Presensi Kajian Pegawai";
@@ -52,8 +64,9 @@ export async function GET(request) {
   /* Sheet 1: ringkasan per marbot */
   const rs = wb.addWorksheet("Ringkasan", { views: [{ state: "frozen", ySplit: 4 }] });
   title(rs, 8, "Presensi marbot masjid", sub);
+  note(rs, 8, catatan);
   const h1 = rs.getRow(4);
-  h1.values = ["No", "Nama", "Sesi hadir", "Tepat waktu", "Terlambat", "Menit dikreditkan", "Target menit", "Persentase"];
+  h1.values = ["No", "Nama", "Sesi hadir", "Tepat waktu", "Terlambat", "Menit dihitung", "Target menit", "Persentase"];
   styleHeader(h1);
   rows.forEach((r, i) => {
     const telat = r.sesi.filter((x) => x.status === "Terlambat").length;
@@ -72,6 +85,7 @@ export async function GET(request) {
   /* Sheet 2: detail per sesi */
   const ds = wb.addWorksheet("Detail", { views: [{ state: "frozen", ySplit: 4 }] });
   title(ds, 8, "Detail presensi marbot per sesi", sub);
+  note(ds, 8, catatan);
   const h2 = ds.getRow(4);
   h2.values = ["No", "Nama", "Shift", "Kegiatan", "Jadwal sesi", "Jam hadir", "Status", "Menit dikreditkan"];
   styleHeader(h2);

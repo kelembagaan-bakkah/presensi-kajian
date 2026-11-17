@@ -36,26 +36,23 @@ Setiap mengubah `Code.gs`, buat **New deployment / Manage deployments > New vers
 
 ## Presensi marbot masjid (halaman `/marbot`)
 
-Marbot presensi pada setiap sesi di sheet **JadwalMarbot**: 6 shift, 11 sesi, total 540 menit atau 9 jam. Lokasi dan radius memakai pengaturan yang sama dengan kajian (sheet Config).
+Marbot presensi pada setiap shift di sheet **JadwalMarbot**. Jadwal totalnya 11 jam, tetapi **jam kerja yang dihitung maksimal 9 jam (540 menit) per hari**. Kelebihan tidak dihitung. Lokasi dan radius memakai pengaturan yang sama dengan kajian (sheet Config).
 
-| Shift | Jam | Menit | Kegiatan | Keterangan |
-|---|---|---|---|---|
-| 1 | 04.30 - 05.20 | 50 | Shalat Shubuh | Persiapan, shalat dan perapihan |
-| 2 | 09.00 - 10.30 | 90 | Kajian | Fleksibel ke kajian Shubuh, pagi atau Maghrib |
-| 2 | 10.30 - 11.00 | 30 | Insidentil | Kegiatan insidentil baik perapihan atau pemeliharaan area masjid |
-| 3 | 11.10 - 12.00 | 50 | Kebersihan Siang | Persiapan siang, pasca tahfiz |
-| 3 | 12.00 - 12.50 | 50 | Shalat Zuhur | Persiapan, shalat dan perapihan (lalu Break) |
-| 4 | 14.20 - 15.10 | 50 | Kebersihan Sore | Persiapan TPA |
-| 4 | 15.10 - 16.00 | 50 | Shalat Ashar | Persiapan, shalat dan perapihan (lalu Break) |
-| 5 | 17.20 - 18.10 | 50 | Kebersihan Malam | Persiapan malam, pasca TPA |
-| 5 | 18.10 - 19.00 | 50 | Shalat Maghrib | Persiapan, shalat dan perapihan |
-| 5 | 19.00 - 19.50 | 50 | Shalat Isya | Persiapan, shalat dan perapihan (lalu Break) |
-| 6 | 22.00 - 22.20 | 20 | Pengecekan Akhir | Mematikan lampu dan elektronik lainnya dan menutup pintu dan akses lainnya |
+| No | Shift | Jam | Durasi |
+|---|---|---|---|
+| 1 | Pagi | 04.30 - 07.30 | 3 jam |
+| 2 | Siang | 10.30 - 13.30 | 3 jam |
+| 3 | Sore | 15.00 - 16.00 | 1 jam |
+| 4 | Malam | 17.30 - 21.30 | 4 jam |
+| | Jumlah jadwal | | 11 jam |
+| | Maksimal dihitung | | 9 jam |
+
+Cara batas 9 jam bekerja: saat marbot presensi, menit yang dikreditkan dikurangi bila totalnya hari itu akan melewati batas. Contoh: hadir tepat waktu di empat shift = 3 + 3 + 1 + 4 = 11 jam, tercatat 9 jam (shift Malam dikreditkan 2 jam). Riwayat dan Excel juga membatasi total harian ke 9 jam. Batas ini bisa diubah di sheet **Config** pada kunci `marbotMaksJam` (dalam jam, `0` = tanpa batas).
 
 Sheet yang dibuat otomatis oleh `setup()`:
 
 - **Marbot**: `ID`, `Nama`, `PIN`. Ganti dua baris contoh dengan data asli.
-- **JadwalMarbot**: `No`, `Shift`, `Kegiatan`, `Mulai`, `Selesai`, `Durasi (menit)`, `Keterangan`, `Break`. Tulis jam sebagai teks, mis. `04:30`. Durasi dihitung otomatis. Isi kolom `Break` (mis. `Break`) bila setelah sesi itu ada waktu istirahat. Kolom dibaca berdasarkan nama header. Jadwal dapat diubah kapan saja tanpa deploy ulang.
+- **JadwalMarbot**: `No`, `Shift`, `Kegiatan`, `Mulai`, `Selesai`, `Durasi (menit)`, `Keterangan`, `Break`. Tulis jam sebagai teks, mis. `04:30`. Durasi dihitung otomatis. `Kegiatan` boleh kosong (nama sesi memakai nama shift). Isi kolom `Break` (mis. `Break`) bila setelah sesi itu ada waktu istirahat. Kolom dibaca berdasarkan nama header. Jadwal dapat diubah kapan saja tanpa deploy ulang.
 - **PresensiMarbot**: hasil presensi (waktu, sesi, kegiatan, status, menit dikreditkan, koordinat, jarak, shift).
 
 Aturan presensi (server yang menentukan sesi dari jam WITA, bukan pilihan marbot):
@@ -77,7 +74,7 @@ Pencarian nama dibatasi 10 percobaan PIN yang tidak cocok per 10 menit per alama
 ## Memperbarui dari versi sebelumnya
 
 1. Ganti isi Apps Script dengan `gas/Code.gs` terbaru, lalu jalankan `setup()` sekali lagi. Fungsi ini menambah kunci Config baru, membuat sheet Marbot, JadwalMarbot, dan PresensiMarbot, serta mengubah `maxAkurasi` dari 50 menjadi 100 bila masih nilai lama. Data yang sudah ada tidak dihapus.
-   Bila sheet **JadwalMarbot** masih berformat lama (kolom `Kelompok`), `setup()` menulis ulang isinya dengan jadwal shift terbaru di atas. Perubahan jadwal yang pernah Anda buat manual di sheet itu akan tertimpa, jadi catat dulu bila perlu. Sheet **PresensiMarbot** hanya diubah header-nya (kolom G menjadi `Kegiatan`, kolom O `Shift` ditambahkan); data presensi lama tetap ada.
+   `setup()` menulis ulang sheet **JadwalMarbot** dengan jadwal bawaan di atas satu kali setiap jadwal bawaan diganti versi (termasuk pada pembaruan ini). Perubahan jadwal yang Anda buat manual di sheet itu akan tertimpa saat itu, jadi catat dulu bila perlu; setelahnya `setup()` tidak menimpa lagi. Kunci `marbotMaksJam` ditambahkan otomatis ke sheet Config. Sheet **PresensiMarbot** hanya diubah header-nya (kolom G menjadi `Kegiatan`, kolom O `Shift` ditambahkan); data presensi lama tetap ada.
 2. **Deploy > Manage deployments > Edit > New version** agar kode baru aktif. URL tidak berubah. Lakukan langkah 1 dan 2 **sebelum** men-deploy Next.js, karena halaman kajian yang baru memakai aksi `cari_pegawai` di Apps Script.
 3. **Zona waktu WITA**: di Apps Script buka **Project Settings (ikon roda gigi)**, centang **Show "appsscript.json" manifest file in editor**, lalu pastikan `"timeZone": "Asia/Makassar"` (contoh ada di `gas/appsscript.json`). Fungsi `setup()` juga menyetel zona waktu spreadsheet ke WITA. Cek manual di spreadsheet: **File > Settings > Time zone** harus `(GMT+08:00) Makassar`.
 4. Ganti `public/logo.png` dan `app/icon.png` bila logo berubah.

@@ -16,6 +16,7 @@ const DEFAULT_CONFIG = [
   ['toleransiMeter', 0, 'Tambahan jarak (meter) untuk selisih GPS. 0 = ketat sesuai radius'],
   ['marbotBukaSebelumMenit', 15, 'Marbot: presensi sesi dibuka sekian menit sebelum jam mulai'],
   ['marbotToleransiMenit', 10, 'Marbot: dianggap terlambat bila melewati jam mulai lebih dari sekian menit'],
+  ['marbotMaksJam', 9, 'Marbot: batas jam kerja yang dihitung per hari. Kelebihan tidak dihitung (0 = tanpa batas)'],
 ];
 
 /* ============ SETUP (aman dijalankan berulang) ============ */
@@ -223,6 +224,7 @@ function readConfig_() {
     toleransiMeter: Number(m.toleransiMeter) || 0,
     marbotBukaSebelumMenit: num_(m.marbotBukaSebelumMenit, 15),
     marbotToleransiMenit: num_(m.marbotToleransiMenit, 10),
+    marbotMaksJam: num_(m.marbotMaksJam, 9),
   };
   if (!isFinite(cfg.latitude) || !isFinite(cfg.longitude)) throw new Error('Koordinat pada sheet Config tidak valid.');
   return cfg;
@@ -301,25 +303,22 @@ function json_(obj) {
 
 
 /* ================================================================
- * MARBOT: presensi per sesi kegiatan (6 shift, 11 sesi)
+ * MARBOT: presensi per shift (Pagi, Siang, Sore, Malam), jam kerja dihitung maksimal 9 jam per hari
  * Sheet: Marbot (ID, Nama, PIN), JadwalMarbot (shift, kegiatan, jam sesi), PresensiMarbot (hasil)
  * ================================================================ */
 const M = { MARBOT: 'Marbot', JADWAL: 'JadwalMarbot', PRESENSI: 'PresensiMarbot' };
 
-// Jadwal marbot (6 shift, 11 sesi, total 540 menit atau 9 jam). Semua kolom bisa diubah di sheet JadwalMarbot.
-// Format: [Shift, Kegiatan, Mulai, Selesai, Keterangan, Break]. Break = 'Break' bila setelah sesi itu ada waktu istirahat.
+// Jadwal marbot: 4 shift dengan total 11 jam, tetapi yang dihitung maksimal 9 jam (540 menit) per hari
+// (config marbotMaksJam). Kelebihan tidak dihitung. Semua kolom bisa diubah di sheet JadwalMarbot.
+// Format: [Shift, Kegiatan, Mulai, Selesai, Keterangan, Break]. Kegiatan boleh kosong (nama sesi memakai nama shift).
+// Break = 'Break' bila setelah sesi itu ada waktu istirahat.
+// Naikkan JADWAL_VERSI bila JADWAL_AWAL diganti, agar setup() menulis ulang sheet JadwalMarbot satu kali.
+const JADWAL_VERSI = 'rundown-4-shift-2026-11';
 const JADWAL_AWAL = [
-  [1, 'Shalat Shubuh', '04:30', '05:20', 'Persiapan, shalat dan perapihan', ''],
-  [2, 'Kajian', '09:00', '10:30', 'Fleksibel ke kajian Shubuh, pagi atau Maghrib', ''],
-  [2, 'Insidentil', '10:30', '11:00', 'Kegiatan insidentil baik perapihan atau pemeliharaan area masjid', ''],
-  [3, 'Kebersihan Siang', '11:10', '12:00', 'Persiapan siang, pasca tahfiz', ''],
-  [3, 'Shalat Zuhur', '12:00', '12:50', 'Persiapan, shalat dan perapihan', 'Break'],
-  [4, 'Kebersihan Sore', '14:20', '15:10', 'Persiapan TPA', ''],
-  [4, 'Shalat Ashar', '15:10', '16:00', 'Persiapan, shalat dan perapihan', 'Break'],
-  [5, 'Kebersihan Malam', '17:20', '18:10', 'Persiapan malam, pasca TPA', ''],
-  [5, 'Shalat Maghrib', '18:10', '19:00', 'Persiapan, shalat dan perapihan', ''],
-  [5, 'Shalat Isya', '19:00', '19:50', 'Persiapan, shalat dan perapihan', 'Break'],
-  [6, 'Pengecekan Akhir', '22:00', '22:20', 'Mematikan lampu dan elektronik lainnya dan menutup pintu dan akses lainnya', ''],
+  ['Pagi', '', '04:30', '07:30', '', ''],
+  ['Siang', '', '10:30', '13:30', '', ''],
+  ['Sore', '', '15:00', '16:00', '', ''],
+  ['Malam', '', '17:30', '21:30', '', ''],
 ];
 
 function setupMarbot_(ss) {
@@ -335,9 +334,13 @@ function setupMarbot_(ss) {
   }
 
   const jd = ss.getSheetByName(M.JADWAL) || ss.insertSheet(M.JADWAL);
-  // Tulis jadwal bila sheet masih kosong atau memakai format lama (kolom Kelompok tanpa Kegiatan dan Keterangan)
-  if (jd.getLastRow() === 0 || String(jd.getRange(1, 2).getValue()).trim() === 'Kelompok') {
+  // Tulis jadwal bila sheet kosong, berformat lama (kolom Kelompok), atau versi jadwal bawaan berubah.
+  // Setelah itu setup() tidak menimpa perubahan manual Anda sampai JADWAL_VERSI diganti lagi.
+  const props = PropertiesService.getScriptProperties();
+  if (jd.getLastRow() === 0 || String(jd.getRange(1, 2).getValue()).trim() === 'Kelompok' ||
+      props.getProperty('jadwalMarbotVersi') !== JADWAL_VERSI) {
     tulisJadwal_(jd);
+    props.setProperty('jadwalMarbotVersi', JADWAL_VERSI);
   }
 
   const pm = ss.getSheetByName(M.PRESENSI) || ss.insertSheet(M.PRESENSI);
@@ -373,6 +376,10 @@ function tulisJadwal_(jd) {
   jd.getRange(t, 6).setFormula('=SUM(F2:F' + (rows.length + 1) + ')');
   jd.getRange(t + 1, 5).setValue('Total jam');
   jd.getRange(t + 1, 6).setFormula('=F' + t + '/60');
+  jd.getRange(t + 2, 5).setValue('Dihitung per hari (menit)');
+  jd.getRange(t + 2, 6).setFormula('=MIN(F' + t + ', IFERROR(INDEX(' + SHEET.CONFIG + '!B:B, MATCH("marbotMaksJam", ' +
+    SHEET.CONFIG + '!A:A, 0))*60, 540))');
+  jd.getRange(t + 3, 5).setValue('Kelebihan tidak dihitung');
   jd.getRange(1, 1, 1, 8).setFontWeight('bold');
   jd.setColumnWidth(3, 150);
   jd.setColumnWidth(7, 420);
@@ -413,18 +420,27 @@ function readJadwal_() {
     const a = toMin_(mulai), b = toMin_(selesai);
     if (!(b > a)) return;
     if (cell(r, cShift)) shift = cell(r, cShift); // sel Shift yang dikosongkan mengikuti baris di atasnya
+    const kegiatan = cell(r, cKeg);
     out.push({
       key: mulai + '-' + selesai,
       shift: shift,
-      kegiatan: cell(r, cKeg),
+      kegiatan: kegiatan,
+      nama: kegiatan || (shift ? 'Shift ' + shift : ''),
       keterangan: cell(r, cKet),
       jeda: cell(r, cBrk) !== '',
       mulai: mulai, selesai: selesai, startMin: a, endMin: b, durasi: b - a,
     });
   });
   out.sort(function (x, y) { return x.startMin - y.startMin; });
-  out.forEach(function (s, i) { s.no = i + 1; });
+  out.forEach(function (s, i) { s.no = i + 1; if (!s.nama) s.nama = 'Sesi ' + s.no; });
   return out;
+}
+
+/** Total menit jadwal dan batas menit yang dihitung per hari (config marbotMaksJam; 0 atau kosong = tanpa batas). */
+function totalMenit_(jadwal, cfg) {
+  const jadwalMenit = jadwal.reduce(function (a, s) { return a + s.durasi; }, 0);
+  const maks = cfg.marbotMaksJam > 0 ? Math.round(cfg.marbotMaksJam * 60) : jadwalMenit;
+  return { jadwalMenit: jadwalMenit, maksMenit: Math.min(jadwalMenit, maks) };
 }
 
 function readMarbot_() {
@@ -441,12 +457,15 @@ function findMarbot_(id) {
 
 function marbotInit_() {
   const jadwal = readJadwal_();
+  const cfg = readConfig_();
+  const tm = totalMenit_(jadwal, cfg);
   return {
     ok: true,
-    config: readConfig_(),
+    config: cfg,
     marbot: readMarbot_().map(function (m) { return { id: m.id, nama: m.nama }; }),
     jadwal: jadwal,
-    totalMenit: jadwal.reduce(function (a, s) { return a + s.durasi; }, 0),
+    totalMenit: tm.maksMenit,
+    jadwalMenit: tm.jadwalMenit,
     serverMs: Date.now(),
   };
 }
@@ -461,6 +480,18 @@ function sesiHariIni_(sh, tanggal, id) {
     if (text_(r[0], 'yyyy-MM-dd') === tanggal && String(r[2]) === id) sudah[String(r[4])] = true;
   });
   return sudah;
+}
+
+/** Total menit yang sudah dikreditkan ke marbot tertentu pada satu tanggal. */
+function kreditHariIni_(sh, tanggal, id) {
+  const last = sh.getLastRow();
+  if (last < 2) return 0;
+  const from = Math.max(2, last - 599);
+  var total = 0;
+  sh.getRange(from, 2, last - from + 1, 8).getValues().forEach(function (r) { // B..I
+    if (text_(r[0], 'yyyy-MM-dd') === tanggal && String(r[2]) === id) total += Number(r[7]) || 0;
+  });
+  return total;
 }
 
 /**
@@ -525,7 +556,8 @@ function marbotPresensi_(b) {
     Number(Utilities.formatDate(now, TZ, 's')) / 60;
 
   const sh = sheet_(M.PRESENSI);
-  const s = pilihSesi_(readJadwal_(), nowMin, cfg.marbotBukaSebelumMenit, sesiHariIni_(sh, tanggal, m.id));
+  const jadwal = readJadwal_();
+  const s = pilihSesi_(jadwal, nowMin, cfg.marbotBukaSebelumMenit, sesiHariIni_(sh, tanggal, m.id));
 
   // Tepat waktu: durasi penuh. Terlambat: hanya sisa menit sampai sesi berakhir.
   var status = 'Tepat waktu', kredit = s.durasi;
@@ -534,16 +566,23 @@ function marbotPresensi_(b) {
     kredit = Math.max(0, Math.round(s.endMin - nowMin));
   }
 
+  // Jam kerja per hari dihitung maksimal marbotMaksJam: kelebihan tidak dikreditkan.
+  const maks = totalMenit_(jadwal, cfg).maksMenit;
+  const sisa = Math.max(0, maks - kreditHariIni_(sh, tanggal, m.id));
+  const kreditPenuh = kredit;
+  kredit = Math.min(kredit, sisa);
+
   const jarakBulat = Math.round(jarak * 10) / 10;
-  sh.appendRow([now, tanggal, jam, m.id, m.nama, s.key, s.kegiatan, s.durasi, kredit, status,
+  sh.appendRow([now, tanggal, jam, m.id, m.nama, s.key, s.nama, s.durasi, kredit, status,
     lat, lng, Math.round(akurasi), jarakBulat, s.shift]);
 
   return {
     ok: true,
     data: {
       nama: m.nama,
-      sesi: { key: s.key, shift: s.shift, kegiatan: s.kegiatan, keterangan: s.keterangan, mulai: s.mulai, selesai: s.selesai, durasi: s.durasi },
+      sesi: { key: s.key, shift: s.shift, kegiatan: s.kegiatan, nama: s.nama, keterangan: s.keterangan, mulai: s.mulai, selesai: s.selesai, durasi: s.durasi },
       tanggal: tanggal, jam: jam, status: status, menit: kredit, jarak: jarakBulat,
+      dibatasi: kredit < kreditPenuh, maksMenit: maks,
     },
   };
 }
@@ -551,6 +590,7 @@ function marbotPresensi_(b) {
 /* ---- riwayat: semua marbot terdaftar, termasuk yang belum hadir ---- */
 function marbotRiwayat_(tanggal) {
   const jadwal = readJadwal_();
+  const tm = totalMenit_(jadwal, readConfig_());
   const map = {}, order = [];
   readMarbot_().forEach(function (m) {
     map[m.id] = { id: m.id, nama: m.nama, sesi: [], menit: 0 };
@@ -570,13 +610,17 @@ function marbotRiwayat_(tanggal) {
     });
   }
 
-  const rows = order.map(function (id) { return map[id]; })
-    .sort(function (a, b) { return a.nama.localeCompare(b.nama); });
+  const rows = order.map(function (id) {
+    const r = map[id];
+    r.menit = Math.min(r.menit, tm.maksMenit); // kelebihan di atas batas harian tidak dihitung
+    return r;
+  }).sort(function (a, b) { return a.nama.localeCompare(b.nama); });
   return {
     ok: true,
     tanggal: tanggal,
     jadwal: jadwal,
-    totalMenit: jadwal.reduce(function (a, s) { return a + s.durasi; }, 0),
+    totalMenit: tm.maksMenit,
+    jadwalMenit: tm.jadwalMenit,
     rows: rows,
   };
 }
