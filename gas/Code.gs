@@ -17,6 +17,7 @@ const DEFAULT_CONFIG = [
   ['marbotBukaSebelumMenit', 15, 'Marbot: presensi sesi dibuka sekian menit sebelum jam mulai'],
   ['marbotToleransiMenit', 10, 'Marbot: dianggap terlambat bila melewati jam mulai lebih dari sekian menit'],
   ['marbotMaksJam', 9, 'Marbot: batas jam kerja yang dihitung per hari. Kelebihan tidak dihitung (0 = tanpa batas)'],
+  ['marbotKeluarSetelahMenit', 5, 'Marbot: toleransi presensi keluar, sekian menit setelah sesi berakhir. Lewat dari itu dianggap lupa keluar'],
 ];
 
 /* ============ SETUP (aman dijalankan berulang) ============ */
@@ -33,6 +34,11 @@ function setup() {
   const have = {};
   cfg.getDataRange().getValues().forEach(function (r, i) { if (r[0]) have[String(r[0]).trim()] = i + 1; });
   DEFAULT_CONFIG.forEach(function (d) { if (!have[d[0]]) cfg.appendRow(d); });
+  // Toleransi keluar bawaan sebelumnya 60 menit; aturan sekarang 5 menit
+  if (have.marbotKeluarSetelahMenit && Number(cfg.getRange(have.marbotKeluarSetelahMenit, 2).getValue()) === 60) {
+    cfg.getRange(have.marbotKeluarSetelahMenit, 2).setValue(5);
+    cfg.getRange(have.marbotKeluarSetelahMenit, 3).setValue(DEFAULT_CONFIG.filter(function (d) { return d[0] === 'marbotKeluarSetelahMenit'; })[0][2]);
+  }
   // Nilai awal lama (50 m) terlalu ketat untuk GPS di dalam bangunan
   if (have.maxAkurasi && Number(cfg.getRange(have.maxAkurasi, 2).getValue()) === 50) {
     cfg.getRange(have.maxAkurasi, 2).setValue(100);
@@ -225,6 +231,7 @@ function readConfig_() {
     marbotBukaSebelumMenit: num_(m.marbotBukaSebelumMenit, 15),
     marbotToleransiMenit: num_(m.marbotToleransiMenit, 10),
     marbotMaksJam: num_(m.marbotMaksJam, 9),
+    marbotKeluarSetelahMenit: num_(m.marbotKeluarSetelahMenit, 5),
   };
   if (!isFinite(cfg.latitude) || !isFinite(cfg.longitude)) throw new Error('Koordinat pada sheet Config tidak valid.');
   return cfg;
@@ -304,9 +311,10 @@ function json_(obj) {
 
 /* ================================================================
  * MARBOT: presensi per shift (Pagi, Siang, Sore, Malam), jam kerja dihitung maksimal 9 jam per hari
- * Sheet: Marbot (ID, Nama, PIN), JadwalMarbot (shift, kegiatan, jam sesi), PresensiMarbot (hasil)
+ * Sheet: Marbot (ID, Nama, PIN), JadwalMarbot (shift, kegiatan, jam sesi), PresensiMarbot (hasil per sesi),
+ * rekap-presensi-marbot (satu baris per marbot per hari: jam masuk dan jam keluar)
  * ================================================================ */
-const M = { MARBOT: 'Marbot', JADWAL: 'JadwalMarbot', PRESENSI: 'PresensiMarbot' };
+const M = { MARBOT: 'Marbot', JADWAL: 'JadwalMarbot', PRESENSI: 'PresensiMarbot', REKAP: 'rekap-presensi-marbot' };
 
 // Jadwal marbot: 4 shift dengan total 11 jam, tetapi yang dihitung maksimal 9 jam (540 menit) per hari
 // (config marbotMaksJam). Kelebihan tidak dihitung. Semua kolom bisa diubah di sheet JadwalMarbot.
@@ -348,16 +356,25 @@ function setupMarbot_(ss) {
     pm.getRange('A:A').setNumberFormat('yyyy-mm-dd hh:mm:ss');
     pm.getRange('B:C').setNumberFormat('@');
     pm.getRange('F:F').setNumberFormat('@');
-    pm.getRange(1, 1, 1, 15).setValues([[
-      'Timestamp (WITA)', 'Tanggal', 'Jam (WITA)', 'ID Marbot', 'Nama', 'Sesi', 'Kegiatan',
+    pm.getRange(1, 1, 1, 21).setValues([[
+      'Timestamp (WITA)', 'Tanggal', 'Jam Masuk (WITA)', 'ID Marbot', 'Nama', 'Sesi', 'Kegiatan',
       'Durasi Jadwal (menit)', 'Menit Dikreditkan', 'Status', 'Latitude', 'Longitude', 'Akurasi (m)', 'Jarak (m)', 'Shift',
+      'Jam Keluar (WITA)', 'Latitude Keluar', 'Longitude Keluar', 'Akurasi Keluar (m)', 'Jarak Keluar (m)', 'Status Keluar',
     ]]);
     pm.setFrozenRows(1);
   } else {
-    // Sheet versi lama: kolom G dulu bernama Kelompok, dan kolom Shift belum ada. Data lama tidak diubah.
+    // Sheet versi lama: kolom G dulu bernama Kelompok, kolom Shift dan kolom keluar (P..T) belum ada. Data lama tidak diubah.
     pm.getRange('G1').setValue('Kegiatan');
+    pm.getRange('C1').setValue('Jam Masuk (WITA)');
     if (!String(pm.getRange('O1').getValue()).trim()) pm.getRange('O1').setValue('Shift');
+    if (!String(pm.getRange('P1').getValue()).trim()) {
+      pm.getRange(1, 16, 1, 5).setValues([['Jam Keluar (WITA)', 'Latitude Keluar', 'Longitude Keluar', 'Akurasi Keluar (m)', 'Jarak Keluar (m)']]);
+    }
   }
+  if (!String(pm.getRange('U1').getValue()).trim()) pm.getRange('U1').setValue('Status Keluar');
+  pm.getRange('P:P').setNumberFormat('@'); // jam keluar sebagai teks
+
+  sheetRekap_(ss);
 }
 
 /** Menulis ulang sheet JadwalMarbot dengan jadwal terbaru: No, Shift, Kegiatan, Mulai, Selesai, Durasi, Keterangan, Break. */
@@ -470,27 +487,91 @@ function marbotInit_() {
   };
 }
 
-/** Sesi yang sudah dipresensi marbot tertentu pada satu tanggal: { 'mulai-selesai': true }. */
-function sesiHariIni_(sh, tanggal, id) {
-  const sudah = {};
+/** Baris presensi marbot tertentu pada satu tanggal, lengkap dengan nomor baris di sheet. */
+function barisHari_(sh, tanggal, id) {
+  const out = [];
   const last = sh.getLastRow();
-  if (last < 2) return sudah;
+  if (last < 2) return out;
   const from = Math.max(2, last - 599);
-  sh.getRange(from, 2, last - from + 1, 5).getValues().forEach(function (r) { // B..F
-    if (text_(r[0], 'yyyy-MM-dd') === tanggal && String(r[2]) === id) sudah[String(r[4])] = true;
+  sh.getRange(from, 1, last - from + 1, 21).getValues().forEach(function (r, i) { // A..U
+    if (text_(r[1], 'yyyy-MM-dd') === tanggal && String(r[3]) === id) {
+      out.push({
+        row: from + i, ts: r[0], jam: text_(r[2], 'HH:mm:ss'), key: String(r[5]),
+        kredit: Number(r[8]) || 0, status: String(r[9]),
+        keluar: r[15] === '' || r[15] === null ? '' : text_(r[15], 'HH:mm:ss'),
+        statusKeluar: String(r[20] || ''),
+      });
+    }
   });
-  return sudah;
+  return out;
 }
 
-/** Total menit yang sudah dikreditkan ke marbot tertentu pada satu tanggal. */
-function kreditHariIni_(sh, tanggal, id) {
+/** Tanggal dan menit (WITA) saat ini. */
+function waktuSekarang_() {
+  const now = new Date();
+  return {
+    tanggal: Utilities.formatDate(now, TZ, 'yyyy-MM-dd'),
+    nowMin: Number(Utilities.formatDate(now, TZ, 'H')) * 60 + Number(Utilities.formatDate(now, TZ, 'm')) +
+      Number(Utilities.formatDate(now, TZ, 's')) / 60,
+  };
+}
+
+/**
+ * Lupa presensi keluar: sesi yang sudah masuk tetapi tidak keluar sampai (jam selesai + toleransi keluar)
+ * dihitung 1/3 dari durasi sesi (tidak lebih dari menit yang sebelumnya dikreditkan sementara).
+ * Hanya baris bertanda 'Menunggu' yang diproses, jadi presensi lama sebelum fitur keluar tidak berubah.
+ * Pemanggil harus memegang lock. Mengembalikan jumlah baris yang diubah.
+ */
+function finalisasiLupaKeluar_(sh, cfg, tanggalIni, nowMin) {
   const last = sh.getLastRow();
   if (last < 2) return 0;
   const from = Math.max(2, last - 599);
-  var total = 0;
-  sh.getRange(from, 2, last - from + 1, 8).getValues().forEach(function (r) { // B..I
-    if (text_(r[0], 'yyyy-MM-dd') === tanggal && String(r[2]) === id) total += Number(r[7]) || 0;
+  var n = 0;
+  sh.getRange(from, 1, last - from + 1, 21).getValues().forEach(function (r, i) { // A..U
+    if (String(r[20]) !== 'Menunggu') return;
+    if (r[15] !== '' && r[15] !== null) return;
+    const selesai = String(r[5]).split('-')[1];
+    if (!selesai) return;
+    const tgl = text_(r[1], 'yyyy-MM-dd');
+    const lewat = tgl < tanggalIni || (tgl === tanggalIni && nowMin > toMin_(selesai) + cfg.marbotKeluarSetelahMenit);
+    if (!lewat) return;
+    const durasi = Number(r[7]) || 0, kredit = Number(r[8]) || 0;
+    sh.getRange(from + i, 9).setValue(Math.min(Math.round(durasi / 3), kredit));
+    sh.getRange(from + i, 21).setValue('Lupa keluar');
+    n++;
   });
+  return n;
+}
+
+/** Untuk pemicu berkala (lihat pasangPemicuFinalisasi). Aman dijalankan manual. */
+function finalisasiLupaKeluar() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const w = waktuSekarang_();
+    return finalisasiLupaKeluar_(sheet_(M.PRESENSI), readConfig_(), w.tanggal, w.nowMin);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Opsional: jalankan sekali dari editor agar lupa keluar diproses tiap 10 menit walau tidak ada yang membuka aplikasi. */
+function pasangPemicuFinalisasi() {
+  const ada = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'finalisasiLupaKeluar'; });
+  if (!ada) ScriptApp.newTrigger('finalisasiLupaKeluar').timeBased().everyMinutes(10).create();
+}
+
+/** Sesi yang sudah dipresensi masuk oleh marbot tertentu pada satu tanggal: { 'mulai-selesai': true }. */
+function sesiHariIni_(sh, tanggal, id) {
+  const sudah = {};
+  barisHari_(sh, tanggal, id).forEach(function (r) { sudah[r.key] = true; });
+  return sudah;
+}
+
+/** Total menit yang sudah dikreditkan ke marbot tertentu pada satu tanggal (kecuali baris kecualiRow). */
+function kreditHariIni_(sh, tanggal, id, kecualiRow) {
+  var total = 0;
+  barisHari_(sh, tanggal, id).forEach(function (r) { if (r.row !== kecualiRow) total += r.kredit; });
   return total;
 }
 
@@ -518,10 +599,12 @@ function pilihSesi_(jadwal, nowMin, buka, sudah) {
   throw new Error('Semua sesi hari ini sudah berakhir.');
 }
 
-/* ---- presensi ---- */
+/* ---- presensi masuk dan keluar ---- */
 function marbotPresensi_(b) {
   const lat = Number(b.lat), lng = Number(b.lng), akurasi = Number(b.akurasi);
   if (!isFinite(lat) || !isFinite(lng) || !isFinite(akurasi)) throw new Error('Data lokasi tidak valid.');
+  const jenis = String(b.jenis || 'masuk').toLowerCase();
+  if (jenis !== 'masuk' && jenis !== 'keluar') throw new Error('Jenis presensi tidak dikenal.');
 
   const cfg = readConfig_();
   const id = String(b.id || '').trim();
@@ -556,7 +639,16 @@ function marbotPresensi_(b) {
     Number(Utilities.formatDate(now, TZ, 's')) / 60;
 
   const sh = sheet_(M.PRESENSI);
+  finalisasiLupaKeluar_(sh, cfg, tanggal, nowMin); // sesi yang lupa keluar dihitung 1/3 sebelum menghitung sisa batas harian
   const jadwal = readJadwal_();
+  const jarakBulat = Math.round(jarak * 10) / 10;
+  const maks = totalMenit_(jadwal, cfg).maksMenit;
+
+  if (jenis === 'keluar') {
+    return keluarMarbot_(sh, cfg, jadwal, m, tanggal, jam, nowMin, maks,
+      { lat: lat, lng: lng, akurasi: Math.round(akurasi), jarak: jarakBulat });
+  }
+
   const s = pilihSesi_(jadwal, nowMin, cfg.marbotBukaSebelumMenit, sesiHariIni_(sh, tanggal, m.id));
 
   // Tepat waktu: durasi penuh. Terlambat: hanya sisa menit sampai sesi berakhir.
@@ -567,30 +659,239 @@ function marbotPresensi_(b) {
   }
 
   // Jam kerja per hari dihitung maksimal marbotMaksJam: kelebihan tidak dikreditkan.
-  const maks = totalMenit_(jadwal, cfg).maksMenit;
-  const sisa = Math.max(0, maks - kreditHariIni_(sh, tanggal, m.id));
+  const sisa = Math.max(0, maks - kreditHariIni_(sh, tanggal, m.id, 0));
   const kreditPenuh = kredit;
   kredit = Math.min(kredit, sisa);
 
-  const jarakBulat = Math.round(jarak * 10) / 10;
+  // Menit dikreditkan sementara seolah marbot bertahan sampai sesi berakhir. Presensi keluar mengoreksinya;
+  // bila lupa keluar, nanti diganti menjadi 1/3 durasi sesi (kolom U = Menunggu).
   sh.appendRow([now, tanggal, jam, m.id, m.nama, s.key, s.nama, s.durasi, kredit, status,
-    lat, lng, Math.round(akurasi), jarakBulat, s.shift]);
+    lat, lng, Math.round(akurasi), jarakBulat, s.shift, '', '', '', '', '', 'Menunggu']);
+
+  // Rekap harian (satu baris per marbot per hari). Kegagalan rekap tidak boleh menggagalkan presensi yang sudah tercatat.
+  try {
+    perbaruiRekapMarbot_(sh, tanggal, m, cfg);
+  } catch (e) {
+    console.error('Rekap marbot gagal: ' + e.message);
+  }
 
   return {
     ok: true,
     data: {
+      jenis: 'masuk',
       nama: m.nama,
-      sesi: { key: s.key, shift: s.shift, kegiatan: s.kegiatan, nama: s.nama, keterangan: s.keterangan, mulai: s.mulai, selesai: s.selesai, durasi: s.durasi },
+      sesi: sesiRingkas_(s),
       tanggal: tanggal, jam: jam, status: status, menit: kredit, jarak: jarakBulat,
       dibatasi: kredit < kreditPenuh, maksMenit: maks,
+      keluarBatas: jamDariDetik_((s.endMin + cfg.marbotKeluarSetelahMenit) * 60).slice(0, 5),
+      lupaMenit: Math.round(s.durasi / 3),
     },
   };
+}
+
+function sesiRingkas_(s) {
+  return { key: s.key, shift: s.shift, kegiatan: s.kegiatan, nama: s.nama, keterangan: s.keterangan,
+    mulai: s.mulai, selesai: s.selesai, durasi: s.durasi };
+}
+
+/**
+ * Presensi keluar = tanda berakhir sesi. Berlaku untuk sesi yang sudah masuk dan belum keluar, paling awal dulu,
+ * sampai marbotKeluarSetelahMenit (default 5) menit setelah sesi berakhir; lewat dari itu dianggap lupa keluar. Menit dihitung dari awal kredit sampai jam keluar,
+ * paling banyak sampai sesi berakhir. Keluar lebih awal dari akhir sesi (di luar toleransi) memotong menit.
+ */
+function keluarMarbot_(sh, cfg, jadwal, m, tanggal, jam, nowMin, maks, lokasi) {
+  const baris = barisHari_(sh, tanggal, m.id);
+  if (!baris.length) throw new Error('Anda belum presensi masuk hari ini. Presensi masuk dulu sebelum keluar.');
+
+  const byKey = {};
+  jadwal.forEach(function (j) { byKey[j.key] = j; });
+  const terbuka = baris
+    .filter(function (r) { return !r.keluar && r.statusKeluar !== 'Lupa keluar' && byKey[r.key]; })
+    .sort(function (x, y) { return byKey[x.key].startMin - byKey[y.key].startMin; });
+  if (!terbuka.length) {
+    if (baris.some(function (r) { return r.statusKeluar === 'Lupa keluar'; })) {
+      throw new Error('Batas presensi keluar sudah lewat (' + cfg.marbotKeluarSetelahMenit +
+        ' menit setelah sesi berakhir). Sesi yang lupa keluar dihitung 1/3 dari durasi sesi.');
+    }
+    throw new Error('Semua sesi Anda hari ini sudah tercatat keluar.');
+  }
+
+  const kandidat = terbuka.filter(function (r) { return nowMin <= byKey[r.key].endMin + cfg.marbotKeluarSetelahMenit; });
+  if (!kandidat.length) {
+    const t = byKey[terbuka[terbuka.length - 1].key];
+    throw new Error('Batas presensi keluar untuk ' + t.nama + ' ' + t.mulai.replace(':', '.') + '-' + t.selesai.replace(':', '.') +
+      ' sudah lewat (' + cfg.marbotKeluarSetelahMenit + ' menit setelah sesi berakhir). Sesi ini dihitung 1/3 dari durasi.');
+  }
+
+  const r = kandidat[0], s = byKey[r.key];
+  const masukMenit = detik_(r.jam) / 60;
+  const telat = r.status === 'Terlambat';
+  const pulangCepat = s.endMin - nowMin > cfg.marbotToleransiMenit;
+  const keluarEfektif = pulangCepat ? nowMin : s.endMin;
+  const mulaiKredit = telat ? masukMenit : s.startMin;
+  const kreditHitung = Math.max(0, Math.min(s.durasi, Math.round(keluarEfektif - mulaiKredit)));
+
+  const sisa = Math.max(0, maks - kreditHariIni_(sh, tanggal, m.id, r.row));
+  const kredit = Math.min(kreditHitung, sisa);
+
+  sh.getRange(r.row, 9).setValue(kredit);
+  sh.getRange(r.row, 16, 1, 5).setValues([[jam, lokasi.lat, lokasi.lng, lokasi.akurasi, lokasi.jarak]]);
+  sh.getRange(r.row, 21).setValue(pulangCepat ? 'Pulang cepat' : 'Tepat waktu');
+
+  try {
+    perbaruiRekapMarbot_(sh, tanggal, m, cfg);
+  } catch (e) {
+    console.error('Rekap marbot gagal: ' + e.message);
+  }
+
+  return {
+    ok: true,
+    data: {
+      jenis: 'keluar',
+      nama: m.nama,
+      sesi: sesiRingkas_(s),
+      tanggal: tanggal, jam: jam, jamMasuk: r.jam, status: r.status, menit: kredit, jarak: lokasi.jarak,
+      pulangCepat: pulangCepat, dibatasi: kredit < kreditHitung, maksMenit: maks,
+    },
+  };
+}
+
+/* ---- rekap harian: satu baris per marbot per hari ---- */
+const REKAP_HEADER = ['Timestamp', 'ID Pegawai', 'Nama', 'Jam Masuk', 'Jam Keluar'];
+
+/** Sheet rekap-presensi-marbot; dibuat bila belum ada. */
+function sheetRekap_(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(M.REKAP);
+  if (!sh) sh = ss.insertSheet(M.REKAP);
+  if (sh.getLastRow() === 0) {
+    sh.getRange('A:A').setNumberFormat('yyyy-mm-dd hh:mm:ss');
+    sh.getRange('B:E').setNumberFormat('@'); // ID dan jam sebagai teks agar tidak diubah otomatis
+    sh.getRange(1, 1, 1, REKAP_HEADER.length).setValues([REKAP_HEADER]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.setColumnWidths(1, 5, 150);
+  }
+  return sh;
+}
+
+function detik_(hhmmss) {
+  const p = String(hhmmss).split(':');
+  return Number(p[0]) * 3600 + Number(p[1] || 0) * 60 + Number(p[2] || 0);
+}
+
+function jamDariDetik_(d) {
+  d = Math.max(0, Math.round(d));
+  const z = function (n) { return (n < 10 ? '0' : '') + n; };
+  return z(Math.floor(d / 3600)) + ':' + z(Math.floor((d % 3600) / 60)) + ':' + z(d % 60);
+}
+
+/**
+ * Rekap satu marbot pada satu hari dari semua sesi yang sudah dipresensi.
+ * entri: [{ ts: Date, jam: 'HH:mm:ss' (masuk), keluar: 'HH:mm:ss' atau '' }]
+ * Jam Masuk  = jam presensi masuk paling awal hari itu.
+ * Jam Keluar = jam presensi keluar paling akhir hari itu (kosong bila belum ada yang keluar). Selisih dengan
+ *              Jam Masuk tidak boleh lebih dari maksJam jam (0 = tanpa batas); bila lebih, Jam Keluar = Jam Masuk + maksJam.
+ * Timestamp  = waktu aktivitas terakhir (masuk atau keluar) hari itu.
+ */
+function hitungRekap_(entri, maksJam, tanggal) {
+  if (!entri.length) return null;
+  var masuk = Infinity, keluar = -1, ts = 0;
+  entri.forEach(function (e) {
+    masuk = Math.min(masuk, detik_(e.jam));
+    ts = Math.max(ts, e.ts instanceof Date ? e.ts.getTime() : 0);
+    if (e.keluar) {
+      keluar = Math.max(keluar, detik_(e.keluar));
+      ts = Math.max(ts, new Date(tanggal + 'T' + e.keluar + '+08:00').getTime() || 0); // WITA = UTC+8
+    }
+  });
+  var keluarTeks = '';
+  if (keluar >= 0) {
+    keluar = Math.max(keluar, masuk);
+    if (maksJam > 0 && keluar - masuk > maksJam * 3600) keluar = masuk + maksJam * 3600;
+    keluarTeks = jamDariDetik_(keluar);
+  }
+  return { ts: ts ? new Date(ts) : new Date(), masuk: jamDariDetik_(masuk), keluar: keluarTeks };
+}
+
+/** Tambah atau perbarui baris rekap marbot pada tanggal itu. */
+function perbaruiRekapMarbot_(shPresensi, tanggal, m, cfg) {
+  const entri = barisHari_(shPresensi, tanggal, m.id);
+  const rk = hitungRekap_(entri, cfg.marbotMaksJam, tanggal);
+  if (!rk) return;
+  const rekap = sheetRekap_();
+  const baris = [rk.ts, m.id, m.nama, rk.masuk, rk.keluar];
+
+  const last = rekap.getLastRow();
+  if (last >= 2) {
+    const from = Math.max(2, last - 599);
+    const vals = rekap.getRange(from, 1, last - from + 1, 2).getValues(); // A..B
+    for (var i = vals.length - 1; i >= 0; i--) {
+      if (text_(vals[i][0], 'yyyy-MM-dd') === tanggal && String(vals[i][1]) === m.id) {
+        rekap.getRange(from + i, 1, 1, 5).setValues([baris]);
+        return;
+      }
+    }
+  }
+  rekap.appendRow(baris);
+}
+
+/**
+ * Susun ulang seluruh sheet rekap-presensi-marbot dari PresensiMarbot. Jalankan dari editor Apps Script
+ * untuk mengisi rekap dari data presensi yang sudah ada (aman diulang; isi lama sheet rekap diganti).
+ */
+function bangunUlangRekapMarbot() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const cfg = readConfig_();
+    const sh = sheet_(M.PRESENSI);
+    const last = sh.getLastRow();
+    const grup = {}, urut = [];
+    if (last >= 2) {
+      sh.getRange(2, 1, last - 1, 16).getValues().forEach(function (r) { // A..P
+        const tanggal = text_(r[1], 'yyyy-MM-dd'), id = String(r[3]);
+        if (!tanggal || !id) return;
+        const k = tanggal + '|' + id;
+        if (!grup[k]) { grup[k] = { id: id, nama: String(r[4]), tanggal: tanggal, entri: [] }; urut.push(k); }
+        grup[k].entri.push({
+          ts: r[0], jam: text_(r[2], 'HH:mm:ss'),
+          keluar: r[15] === '' || r[15] === null ? '' : text_(r[15], 'HH:mm:ss'),
+        });
+      });
+    }
+    const rows = urut.map(function (k) {
+      const g = grup[k], rk = hitungRekap_(g.entri, cfg.marbotMaksJam, g.tanggal);
+      return [rk.ts, g.id, g.nama, rk.masuk, rk.keluar];
+    }).sort(function (a, b) { return a[0] - b[0]; });
+
+    const rekap = sheetRekap_();
+    const lastR = rekap.getLastRow();
+    if (lastR >= 2) rekap.getRange(2, 1, lastR - 1, 5).clearContent();
+    if (rows.length) rekap.getRange(2, 1, rows.length, 5).setValues(rows);
+    return rows.length;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /* ---- riwayat: semua marbot terdaftar, termasuk yang belum hadir ---- */
 function marbotRiwayat_(tanggal) {
   const jadwal = readJadwal_();
-  const tm = totalMenit_(jadwal, readConfig_());
+  const cfg = readConfig_();
+  const tm = totalMenit_(jadwal, cfg);
+
+  // Proses sesi yang lupa keluar lebih dulu (dilewati bila lock sedang dipakai; akan diproses pada pembacaan berikutnya)
+  const lock = LockService.getScriptLock();
+  if (lock.tryLock(3000)) {
+    try {
+      const w = waktuSekarang_();
+      finalisasiLupaKeluar_(sheet_(M.PRESENSI), cfg, w.tanggal, w.nowMin);
+    } catch (e) {
+      console.error('Finalisasi lupa keluar gagal: ' + e.message);
+    } finally {
+      lock.releaseLock();
+    }
+  }
   const map = {}, order = [];
   readMarbot_().forEach(function (m) {
     map[m.id] = { id: m.id, nama: m.nama, sesi: [], menit: 0 };
@@ -600,12 +901,16 @@ function marbotRiwayat_(tanggal) {
   const sh = sheet_(M.PRESENSI);
   const last = sh.getLastRow();
   if (last >= 2) {
-    sh.getRange(2, 2, last - 1, 9).getValues().forEach(function (r) { // B..J
+    sh.getRange(2, 2, last - 1, 20).getValues().forEach(function (r) { // B..U
       if (text_(r[0], 'yyyy-MM-dd') !== tanggal) return;
       const id = String(r[2]);
       if (!map[id]) { map[id] = { id: id, nama: String(r[3]), sesi: [], menit: 0 }; order.push(id); }
       const kredit = Number(r[7]) || 0;
-      map[id].sesi.push({ key: String(r[4]), jam: text_(r[1], 'HH:mm:ss').slice(0, 5), status: String(r[8]), menit: kredit });
+      const keluar = r[14] === '' || r[14] === null ? '' : text_(r[14], 'HH:mm:ss').slice(0, 5);
+      map[id].sesi.push({
+        key: String(r[4]), jam: text_(r[1], 'HH:mm:ss').slice(0, 5), keluar: keluar,
+        statusKeluar: String(r[19] || ''), status: String(r[8]), menit: kredit,
+      });
       map[id].menit += kredit;
     });
   }

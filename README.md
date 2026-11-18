@@ -36,7 +36,9 @@ Setiap mengubah `Code.gs`, buat **New deployment / Manage deployments > New vers
 
 ## Presensi marbot masjid (halaman `/marbot`)
 
-Marbot presensi pada setiap shift di sheet **JadwalMarbot**. Jadwal totalnya 11 jam, tetapi **jam kerja yang dihitung maksimal 9 jam (540 menit) per hari**. Kelebihan tidak dihitung. Lokasi dan radius memakai pengaturan yang sama dengan kajian (sheet Config).
+> **Batas tegas: jam kerja marbot yang dihitung tidak boleh lebih dari 9 jam (540 menit) per hari.** Batas ini berlaku pada menit yang dikreditkan, total di riwayat, Excel, dan rentang Jam Masuk sampai Jam Keluar di sheet rekap. Kelebihan tidak dihitung.
+
+Marbot presensi pada setiap shift di sheet **JadwalMarbot**. Jadwal totalnya 11 jam, tetapi yang dihitung maksimal 9 jam per hari. Lokasi dan radius memakai pengaturan yang sama dengan kajian (sheet Config).
 
 | No | Shift | Jam | Durasi |
 |---|---|---|---|
@@ -53,15 +55,29 @@ Sheet yang dibuat otomatis oleh `setup()`:
 
 - **Marbot**: `ID`, `Nama`, `PIN`. Ganti dua baris contoh dengan data asli.
 - **JadwalMarbot**: `No`, `Shift`, `Kegiatan`, `Mulai`, `Selesai`, `Durasi (menit)`, `Keterangan`, `Break`. Tulis jam sebagai teks, mis. `04:30`. Durasi dihitung otomatis. `Kegiatan` boleh kosong (nama sesi memakai nama shift). Isi kolom `Break` (mis. `Break`) bila setelah sesi itu ada waktu istirahat. Kolom dibaca berdasarkan nama header. Jadwal dapat diubah kapan saja tanpa deploy ulang.
-- **PresensiMarbot**: hasil presensi (waktu, sesi, kegiatan, status, menit dikreditkan, koordinat, jarak, shift).
+- **PresensiMarbot**: satu baris per sesi per marbot: data **masuk** di kolom A sampai O (waktu, sesi, kegiatan, status, menit dikreditkan, koordinat, jarak, shift) dan data **keluar** di kolom P sampai T (jam keluar, koordinat, akurasi, jarak).
+- **rekap-presensi-marbot**: kolom `Timestamp`, `ID Pegawai`, `Nama`, `Jam Masuk`, `Jam Keluar`. Hanya **satu baris per marbot per hari**, berapa pun sesi yang sudah dipresensi. Baris dibuat saat presensi pertama hari itu dan diperbarui setiap presensi berikutnya.
+  - `Jam Masuk`: jam presensi **masuk** paling awal hari itu.
+  - `Jam Keluar`: jam presensi **keluar** paling akhir hari itu; kosong bila belum ada sesi yang keluar (sesi yang lupa keluar tidak punya jam keluar). Selisih dengan Jam Masuk tidak boleh lebih dari 9 jam; bila lebih, Jam Keluar = Jam Masuk + 9 jam (batas mengikuti `marbotMaksJam` di sheet Config). Contoh: masuk 04:30:12 dan keluar terakhir 21:30:00 menjadi keluar 13:30:12.
+  - `Timestamp`: waktu aktivitas terakhir (masuk atau keluar) hari itu.
+  - Untuk mengisi rekap dari data presensi yang sudah ada, jalankan fungsi `bangunUlangRekapMarbot` sekali dari editor Apps Script. Fungsi ini menyusun ulang seluruh isi sheet rekap dari PresensiMarbot dan aman diulang.
 
-Aturan presensi (server yang menentukan sesi dari jam WITA, bukan pilihan marbot):
+Aturan presensi (server yang menentukan sesi dari jam WITA, bukan pilihan marbot). Setiap sesi punya **presensi masuk** dan **presensi keluar**; keluar menandai sesi berakhir. Di halaman `/marbot` pilih **Masuk** atau **Keluar**, lalu isi nama dan PIN.
 
+Masuk:
 - Sesi dibuka `marbotBukaSebelumMenit` (default 15) menit sebelum jam mulai dan tertutup saat jam selesai.
-- Hadir sampai `marbotToleransiMenit` (default 10) menit setelah jam mulai dinilai **Tepat waktu** dan dikreditkan sebesar durasi penuh sesi.
-- Lebih dari itu dinilai **Terlambat** dan hanya dikreditkan sisa menit sampai sesi berakhir.
-- Satu sesi hanya bisa dipresensi satu kali per marbot per hari. Bila dua sesi bersambung (mis. 11.10-12.00 dan 12.00-12.50), marbot presensi sekali di tiap sesi.
-- Riwayat menampilkan semua marbot terdaftar, termasuk yang belum hadir, 10 baris per halaman. Tombol **Excel** menghasilkan dua sheet: Ringkasan (per marbot) dan Detail (per sesi, lengkap dengan shift dan kegiatan).
+- Masuk sampai `marbotToleransiMenit` (default 10) menit setelah jam mulai dinilai **Tepat waktu**; lebih dari itu **Terlambat**.
+- Satu sesi hanya bisa masuk satu kali per marbot per hari.
+
+Keluar:
+- Berlaku untuk sesi yang sudah masuk dan belum keluar (yang paling awal dulu). Toleransi presensi keluar adalah **5 menit setelah sesi berakhir** (`marbotKeluarSetelahMenit`). Lokasi dan PIN diperiksa seperti presensi masuk.
+- Menit dihitung dari awal kredit sampai jam keluar, paling banyak sampai sesi berakhir. Tepat waktu mulai dari jam mulai sesi; terlambat mulai dari jam masuk. Keluar sebelum sesi berakhir, di luar toleransi `marbotToleransiMenit`, memotong menit sampai jam keluar; dalam toleransi dihitung sampai akhir sesi.
+- **Lupa presensi keluar:** bila sampai 5 menit setelah sesi berakhir marbot belum keluar, menit sesi itu dihitung **1/3 dari durasi sesi** (mis. sesi 3 jam menjadi 60 menit, sesi 1 jam menjadi 20 menit). Bila menit yang dikreditkan sebelumnya lebih kecil dari 1/3 itu (mis. masuk sangat terlambat), yang dipakai nilai yang lebih kecil. Sesi tersebut ditandai `Lupa keluar` di kolom U sheet PresensiMarbot dan tidak bisa lagi dikeluarkan.
+- Sebelum batas keluar lewat, menit dikreditkan sementara seperti bila marbot bertahan sampai sesi berakhir (kolom U = `Menunggu`). Perubahan ke 1/3 diproses otomatis setiap ada presensi atau riwayat dibuka. Agar tetap terproses walau tidak ada yang membuka aplikasi, jalankan `pasangPemicuFinalisasi` sekali dari editor Apps Script (pemicu tiap 10 menit, memanggil `finalisasiLupaKeluar`).
+- Batas 9 jam per hari tetap berlaku pada total menit, dan dihitung setelah sesi yang lupa keluar diubah menjadi 1/3.
+- Presensi lama sebelum fitur keluar (kolom U kosong) tidak diubah.
+
+- Riwayat menampilkan semua marbot terdaftar, termasuk yang belum hadir, 10 baris per halaman. Tombol **Excel** menghasilkan dua sheet: Ringkasan (per marbot) dan Detail (per sesi, lengkap dengan shift, kegiatan, jam masuk, dan jam keluar). Titik kehadiran yang belum keluar tampak lebih pudar, dan tooltipnya menulis "belum keluar" atau "lupa keluar".
 
 ## Alur presensi kajian
 
@@ -74,7 +90,7 @@ Pencarian nama dibatasi 10 percobaan PIN yang tidak cocok per 10 menit per alama
 ## Memperbarui dari versi sebelumnya
 
 1. Ganti isi Apps Script dengan `gas/Code.gs` terbaru, lalu jalankan `setup()` sekali lagi. Fungsi ini menambah kunci Config baru, membuat sheet Marbot, JadwalMarbot, dan PresensiMarbot, serta mengubah `maxAkurasi` dari 50 menjadi 100 bila masih nilai lama. Data yang sudah ada tidak dihapus.
-   `setup()` menulis ulang sheet **JadwalMarbot** dengan jadwal bawaan di atas satu kali setiap jadwal bawaan diganti versi (termasuk pada pembaruan ini). Perubahan jadwal yang Anda buat manual di sheet itu akan tertimpa saat itu, jadi catat dulu bila perlu; setelahnya `setup()` tidak menimpa lagi. Kunci `marbotMaksJam` ditambahkan otomatis ke sheet Config. Sheet **PresensiMarbot** hanya diubah header-nya (kolom G menjadi `Kegiatan`, kolom O `Shift` ditambahkan); data presensi lama tetap ada.
+   `setup()` menulis ulang sheet **JadwalMarbot** dengan jadwal bawaan di atas satu kali setiap jadwal bawaan diganti versi (termasuk pada pembaruan ini). Perubahan jadwal yang Anda buat manual di sheet itu akan tertimpa saat itu, jadi catat dulu bila perlu; setelahnya `setup()` tidak menimpa lagi. Kunci `marbotMaksJam` ditambahkan otomatis ke sheet Config. Sheet **PresensiMarbot** hanya diubah header-nya (kolom G menjadi `Kegiatan`, kolom O `Shift`, dan kolom P sampai T untuk data keluar ditambahkan); data presensi lama tetap ada. Kolom U (`Status Keluar`) ditambahkan. Kunci `marbotKeluarSetelahMenit` ditambahkan ke Config; bila nilainya masih 60 dari versi sebelumnya, `setup()` mengubahnya menjadi 5. Kunci `marbotKeluarWajib` dari versi sebelumnya tidak dipakai lagi dan boleh dihapus. Setelah itu jalankan `bangunUlangRekapMarbot` bila ingin menyusun ulang sheet rekap.
 2. **Deploy > Manage deployments > Edit > New version** agar kode baru aktif. URL tidak berubah. Lakukan langkah 1 dan 2 **sebelum** men-deploy Next.js, karena halaman kajian yang baru memakai aksi `cari_pegawai` di Apps Script.
 3. **Zona waktu WITA**: di Apps Script buka **Project Settings (ikon roda gigi)**, centang **Show "appsscript.json" manifest file in editor**, lalu pastikan `"timeZone": "Asia/Makassar"` (contoh ada di `gas/appsscript.json`). Fungsi `setup()` juga menyetel zona waktu spreadsheet ke WITA. Cek manual di spreadsheet: **File > Settings > Time zone** harus `(GMT+08:00) Makassar`.
 4. Ganti `public/logo.png` dan `app/icon.png` bila logo berubah.

@@ -66,14 +66,24 @@ export default function RiwayatMarbot({
               </div>
               <span className={`chip${r.menit ? " start" : " pending"}`}>
                 <small>Menit</small>
-                {r.menit}/{totalMenit}
+                {Math.min(r.menit, totalMenit || r.menit)}/{totalMenit}
               </span>
               <div className="dots" role="img" aria-label={`${r.sesi.length} dari ${jadwal.length} sesi hadir`}>
                 {jadwal.map((s) => {
                   const x = r.sesi.find((v) => v.key === s.key);
-                  const cls = x ? (x.status === "Terlambat" ? "t" : "h") : "";
+                  const cls = x ? `${x.status === "Terlambat" || x.statusKeluar === "Lupa keluar" ? "t" : "h"}${x.keluar || !x.statusKeluar ? "" : " o"}` : "";
                   const tip = `${s.nama} ${fmtJam(s.mulai)}–${fmtJam(s.selesai)}: ${
-                    x ? `${x.status}, hadir ${fmtJam(x.jam)}` : "belum hadir"
+                    x
+                      ? `${x.status}, masuk ${fmtJam(x.jam)}${
+                          x.keluar
+                            ? `, keluar ${fmtJam(x.keluar)}`
+                            : x.statusKeluar === "Lupa keluar"
+                            ? ", lupa keluar (dihitung 1/3 durasi)"
+                            : x.statusKeluar
+                            ? ", belum keluar"
+                            : ""
+                        }`
+                      : "belum hadir"
                   }`;
                   return <i key={s.key} className={cls} title={tip} />;
                 })}

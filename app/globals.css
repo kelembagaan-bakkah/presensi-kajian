@@ -293,6 +293,8 @@ footer { max-width: 980px; margin: 0 auto; padding: 0 14px 20px; text-align: cen
 
 /* Jadwal marbot per shift */
 .field > .caption { margin: 0 0 6px; }
+.caption.batas { color: var(--green-deep); }
+.caption.batas strong { font-weight: 700; }
 .jadwal { list-style: none; padding: 0; display: grid; gap: 4px; }
 .jd {
   display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 8px;
@@ -315,6 +317,7 @@ footer { max-width: 980px; margin: 0 auto; padding: 0 14px 20px; text-align: cen
 .jd.telat .jd-main small, .jd.telat .jd-stat { color: var(--warn); }
 .jd.lewat { background: #edf3ef; border-color: transparent; color: var(--muted); }
 .jd.aktif { border-color: var(--green); box-shadow: 0 0 0 2px rgba(0, 180, 88, 0.28); }
+.jd.belum-keluar { border-style: dashed; }
 .jd-break {
   padding: 2px 8px; border-radius: 8px; background: #edf3ef; color: var(--muted);
   font-size: 0.66rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; text-align: center;
@@ -324,3 +327,4 @@ footer { max-width: 980px; margin: 0 auto; padding: 0 14px 20px; text-align: cen
 .dots i { width: 10px; height: 10px; border-radius: 50%; background: #dbe7df; }
 .dots i.h { background: var(--green); }
 .dots i.t { background: var(--warn-dot); }
+.dots i.o { opacity: 0.55; }

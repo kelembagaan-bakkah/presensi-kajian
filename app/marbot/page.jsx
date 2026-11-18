@@ -5,11 +5,15 @@ import Hero from "../../components/Hero";
 import LokasiCard from "../../components/LokasiCard";
 import RiwayatMarbot from "../../components/RiwayatMarbot";
 import useLokasi, { formatDistance } from "../../lib/useLokasi";
-import { fmtJam, formatJamTotal, sesiTerbuka } from "../../lib/marbot";
+import { fmtJam, formatJamTotal, sesiKeluar, sesiTerbuka } from "../../lib/marbot";
 import { fmtDate, fmtIso, fmtTime, menitHariIni } from "../../lib/waktu";
 
 const STORAGE_KEY = "presensi-marbot:id";
 const POLL_MS = 60000;
+const JENIS = [
+  { value: "masuk", label: "Masuk", hint: "Awal sesi" },
+  { value: "keluar", label: "Keluar", hint: "Akhir sesi" },
+];
 
 const pad = (n) => String(n).padStart(2, "0");
 const jamDariMenit = (m) => `${pad(Math.floor(m / 60))}.${pad(Math.round(m % 60))}`;
@@ -21,6 +25,7 @@ export default function MarbotPage() {
   });
   const [marbotId, setMarbotId] = useState("");
   const [pin, setPin] = useState("");
+  const [jenis, setJenis] = useState("masuk");
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState(null);
   const [now, setNow] = useState(null);
@@ -124,9 +129,31 @@ export default function MarbotPage() {
   const sudah = useMemo(() => Object.fromEntries((me?.sesi || []).map((x) => [x.key, x])), [me]);
   const buka = cfg?.marbotBukaSebelumMenit ?? 15;
   const toleransi = cfg?.marbotToleransiMenit ?? 10;
-  const sel = nowMin !== null && boot.state === "ready" ? sesiTerbuka(boot.jadwal, nowMin, buka, sudah) : null;
+  const setelah = cfg?.marbotKeluarSetelahMenit ?? 5;
+  const ready = nowMin !== null && boot.state === "ready";
+  const sel = ready ? sesiTerbuka(boot.jadwal, nowMin, buka, sudah) : null;
+  const selKeluar = ready ? sesiKeluar(boot.jadwal, nowMin, setelah, sudah) : null;
+  const keluar = jenis === "keluar";
 
   const sesiInfo = (() => {
+    if (!ready) return { tone: "none", head: "Memuat jadwal…", body: "" };
+    if (keluar) {
+      if (!marbotId) return { tone: "none", head: "Presensi keluar", body: "Pilih nama Anda untuk melihat sesi yang perlu ditutup." };
+      if (!selKeluar) {
+        return { tone: "none", head: "Tidak ada sesi yang perlu keluar", body: "Presensi keluar tersedia setelah Anda presensi masuk pada suatu sesi." };
+      }
+      const s = selKeluar;
+      const x = sudah[s.key];
+      const cepat = s.endMin - nowMin > toleransi;
+      return {
+        tone: cepat ? "late" : "ok",
+        head: `${s.nama} ${fmtJam(s.mulai)}–${fmtJam(s.selesai)}`,
+        body: cepat
+          ? `Masuk ${fmtJam(x.jam)}. Keluar sebelum sesi berakhir (${fmtJam(s.selesai)}): menit dihitung sampai sekarang.`
+          : `Masuk ${fmtJam(x.jam)}. Presensi keluar menandai sesi berakhir.`,
+        note: `Batas presensi keluar pukul ${jamDariMenit(s.endMin + setelah)}. ${infoSesi(s)}`.trim(),
+      };
+    }
     if (!sel) return { tone: "none", head: "Memuat jadwal…", body: "" };
     if (sel.state === "aktif") {
       const s = sel.sesi;
@@ -136,8 +163,11 @@ export default function MarbotPage() {
         head: `${s.nama} ${fmtJam(s.mulai)}–${fmtJam(s.selesai)}`,
         body: telat
           ? `Terlambat. Menit yang dikreditkan sekitar ${Math.max(0, Math.round(s.endMin - nowMin))} dari ${s.durasi} menit.`
-          : `${s.durasi} menit. Presensi sesi ini terbuka.`,
-        note: infoSesi(s),
+          : `${s.durasi} menit. Presensi masuk sesi ini terbuka.`,
+        note: [
+          infoSesi(s),
+          `Presensi keluar paling lambat ${jamDariMenit(s.endMin + setelah)}. Bila lupa keluar, menit dihitung 1/3 dari durasi sesi (${Math.round(s.durasi / 3)} menit).`,
+        ].filter(Boolean).join(" "),
       };
     }
     if (sel.state === "sudah") return { tone: "none", head: "Sesi ini sudah tercatat", body: "Presensi untuk sesi yang sedang berjalan sudah masuk." };
@@ -157,8 +187,10 @@ export default function MarbotPage() {
     ? "Pilih nama Anda untuk melanjutkan."
     : pin.length < 4
     ? "Masukkan PIN Anda."
-    : !sel || sel.state !== "aktif"
-    ? "Presensi aktif saat sesi dibuka."
+    : keluar && !selKeluar
+    ? "Presensi keluar aktif setelah Anda presensi masuk."
+    : !keluar && (!sel || sel.state !== "aktif")
+    ? "Presensi masuk aktif saat sesi dibuka."
     : !metrics
     ? "Menunggu lokasi Anda."
     : !accOk
@@ -178,18 +210,27 @@ export default function MarbotPage() {
       const res = await fetch("/api/marbot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: marbotId, pin, lat: geo.pos.lat, lng: geo.pos.lng, akurasi: geo.pos.acc }),
+        body: JSON.stringify({ jenis, id: marbotId, pin, lat: geo.pos.lat, lng: geo.pos.lng, akurasi: geo.pos.acc }),
       });
       const d = await res.json();
       if (!d.ok) throw new Error(d.error || "Presensi belum bisa dicatat.");
       const x = d.data;
-      setNotice({
-        type: "ok",
-        title: `Kehadiran ${x.sesi.nama} ${fmtJam(x.sesi.mulai)} tercatat`,
-        detail: `${x.nama} pukul ${x.jam} WITA, ${x.status.toLowerCase()}, ${x.menit} menit dikreditkan${
-          x.dibatasi ? ` (batas ${formatJamTotal(x.maksMenit)} per hari tercapai, kelebihan tidak dihitung)` : ""
-        }, ${formatDistance(x.jarak)} m dari titik masjid.`,
-      });
+      const batas = x.dibatasi ? ` (batas ${formatJamTotal(x.maksMenit)} per hari tercapai, kelebihan tidak dihitung)` : "";
+      setNotice(
+        x.jenis === "keluar"
+          ? {
+              type: "ok",
+              title: `Keluar ${x.sesi.nama} ${fmtJam(x.sesi.mulai)} tercatat`,
+              detail: `${x.nama} masuk ${fmtJam(x.jamMasuk.slice(0, 5))}, keluar ${fmtJam(x.jam.slice(0, 5))} WITA${
+                x.pulangCepat ? " (sebelum sesi berakhir)" : ""
+              }, ${x.menit} menit dikreditkan${batas}, ${formatDistance(x.jarak)} m dari titik masjid.`,
+            }
+          : {
+              type: "ok",
+              title: `Masuk ${x.sesi.nama} ${fmtJam(x.sesi.mulai)} tercatat`,
+              detail: `${x.nama} pukul ${x.jam} WITA, ${x.status.toLowerCase()}, ${x.menit} menit dikreditkan sementara${batas}, ${formatDistance(x.jarak)} m dari titik masjid. Presensi keluar paling lambat pukul ${fmtJam(x.keluarBatas)}; bila lupa, menit dihitung ${x.lupaMenit} (1/3 durasi sesi).`,
+            }
+      );
       setPin("");
       if (tanggal !== today) setTanggal(today);
       loadToday(true);
@@ -206,7 +247,7 @@ export default function MarbotPage() {
     try { localStorage.setItem(STORAGE_KEY, id); } catch {}
   }
 
-  const menit = me?.menit || 0;
+  const menit = boot.totalMenit ? Math.min(me?.menit || 0, boot.totalMenit) : me?.menit || 0;
 
   return (
     <main>
@@ -228,6 +269,31 @@ export default function MarbotPage() {
             {sesiInfo.body && <span>{sesiInfo.body}</span>}
             {sesiInfo.note && <span className="sesi-ket">{sesiInfo.note}</span>}
           </div>
+
+          <fieldset className="field">
+            <legend>Jenis presensi</legend>
+            <div className="choice">
+              {JENIS.map((j) => (
+                <label key={j.value}>
+                  <input
+                    type="radio"
+                    name="jenis-marbot"
+                    value={j.value}
+                    checked={jenis === j.value}
+                    onChange={() => {
+                      setJenis(j.value);
+                      setNotice(null);
+                    }}
+                  />
+                  <span className="tile">
+                    <i className="dot" aria-hidden="true" />
+                    <strong>{j.label}</strong>
+                    <small>{j.hint}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
 
           <div className="field">
             <label htmlFor="marbot">Nama marbot</label>
@@ -254,7 +320,15 @@ export default function MarbotPage() {
           </div>
 
           <button type="submit" className="primary" disabled={!canSubmit}>
-            {sending ? "Mencatat…" : sel?.state === "aktif" ? `Catat kehadiran ${fmtJam(sel.sesi.mulai)}` : "Catat kehadiran"}
+            {sending
+              ? "Mencatat…"
+              : keluar
+              ? selKeluar
+                ? `Catat keluar ${fmtJam(selKeluar.mulai)}`
+                : "Catat keluar"
+              : sel?.state === "aktif"
+              ? `Catat masuk ${fmtJam(sel.sesi.mulai)}`
+              : "Catat masuk"}
           </button>
           {blocker && boot.state === "ready" && <p className="blocker">{blocker}</p>}
 
@@ -288,17 +362,23 @@ export default function MarbotPage() {
                   <i style={{ width: `${Math.min(100, (menit / (boot.totalMenit || 1)) * 100)}%` }} />
                 </div>
               )}
-              {boot.jadwalMenit > boot.totalMenit && (
-                <p className="caption">
-                  Jadwal {formatJamTotal(boot.jadwalMenit)}, yang dihitung maksimal {formatJamTotal(boot.totalMenit)} per hari.
-                  Kelebihan tidak dihitung.
+              {boot.totalMenit > 0 && (
+                <p className="caption batas">
+                  <strong>
+                    Maksimal {formatJamTotal(boot.totalMenit)} ({boot.totalMenit} menit) dihitung per hari.
+                  </strong>{" "}
+                  {boot.jadwalMenit > boot.totalMenit
+                    ? `Jadwal ${formatJamTotal(boot.jadwalMenit)}; kelebihan tidak dihitung.`
+                    : "Kelebihan tidak dihitung."}
                 </p>
               )}
               <ol className="jadwal">
                 {boot.jadwal.map((s) => {
                   const x = sudah[s.key];
                   const cls = x
-                    ? x.status === "Terlambat" ? "telat" : "hadir"
+                    ? x.statusKeluar === "Lupa keluar"
+                      ? "telat"
+                      : `${x.status === "Terlambat" ? "telat" : "hadir"}${x.keluar || !x.statusKeluar ? "" : " belum-keluar"}`
                     : nowMin !== null && nowMin >= s.endMin
                     ? "lewat"
                     : sel?.state === "aktif" && sel.sesi.key === s.key
@@ -313,7 +393,13 @@ export default function MarbotPage() {
                           <small>{fmtJam(s.mulai)}–{fmtJam(s.selesai)}{s.keterangan ? `, ${s.keterangan}` : ""}</small>
                         </div>
                         <span className="jd-stat">
-                          {x ? `${x.status === "Terlambat" ? "Terlambat" : "Hadir"} ${fmtJam(x.jam)}` : `${s.durasi} mnt`}
+                          {x
+                            ? x.keluar
+                              ? `${fmtJam(x.jam)}–${fmtJam(x.keluar)}`
+                              : x.statusKeluar === "Lupa keluar"
+                              ? `${fmtJam(x.jam)}, lupa keluar`
+                              : `Masuk ${fmtJam(x.jam)}`
+                            : `${s.durasi} mnt`}
                         </span>
                       </li>
                       {s.jeda && <li className="jd-break" aria-label="Break">Break</li>}

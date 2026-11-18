@@ -54,9 +54,9 @@ export async function GET(request) {
   const byKey = Object.fromEntries(jadwal.map((s) => [s.key, s]));
   const jamTxt = (m) => `${Number.isInteger(m / 60) ? m / 60 : (m / 60).toFixed(1).replace(".", ",")} jam`;
   const catatan =
-    jadwalMenit > totalMenit
-      ? `Jadwal ${jamTxt(jadwalMenit)}; yang dihitung maksimal ${jamTxt(totalMenit)} per hari, kelebihan tidak dihitung.`
-      : "";
+    `MAKSIMAL ${jamTxt(totalMenit)} (${totalMenit} menit) dihitung per hari, kelebihan tidak dihitung.` +
+    (jadwalMenit > totalMenit ? ` Jadwal ${jamTxt(jadwalMenit)}.` : "") +
+    " Lupa presensi keluar dihitung 1/3 durasi sesi.";
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "Presensi Kajian Pegawai";
@@ -72,7 +72,7 @@ export async function GET(request) {
     const telat = r.sesi.filter((x) => x.status === "Terlambat").length;
     const row = rs.addRow([
       i + 1, r.nama, `${r.sesi.length} dari ${jadwal.length}`,
-      r.sesi.length - telat, telat, r.menit, totalMenit, totalMenit ? r.menit / totalMenit : 0,
+      r.sesi.length - telat, telat, Math.min(r.menit, totalMenit || r.menit), totalMenit, totalMenit ? Math.min(r.menit, totalMenit) / totalMenit : 0,
     ]);
     row.getCell(8).numFmt = "0%";
     row.eachCell((c, col) => {
@@ -84,10 +84,10 @@ export async function GET(request) {
 
   /* Sheet 2: detail per sesi */
   const ds = wb.addWorksheet("Detail", { views: [{ state: "frozen", ySplit: 4 }] });
-  title(ds, 8, "Detail presensi marbot per sesi", sub);
-  note(ds, 8, catatan);
+  title(ds, 9, "Detail presensi marbot per sesi", sub);
+  note(ds, 9, catatan);
   const h2 = ds.getRow(4);
-  h2.values = ["No", "Nama", "Shift", "Kegiatan", "Jadwal sesi", "Jam hadir", "Status", "Menit dikreditkan"];
+  h2.values = ["No", "Nama", "Shift", "Kegiatan", "Jadwal sesi", "Jam masuk", "Jam keluar", "Status", "Menit dikreditkan"];
   styleHeader(h2);
   let n = 0;
   rows.forEach((r) => {
@@ -98,7 +98,7 @@ export async function GET(request) {
         const row = ds.addRow([
           ++n, r.nama, s?.shift ? Number(s.shift) || s.shift : "-", s?.kegiatan || "-",
           s ? `${jam(s.mulai)} - ${jam(s.selesai)}` : jam(x.key),
-          jam(x.jam), x.status, x.menit,
+          jam(x.jam), x.keluar ? jam(x.keluar) : x.statusKeluar === "Lupa keluar" ? "Lupa keluar" : x.statusKeluar ? "Belum keluar" : "-", x.status, x.menit,
         ]);
         row.eachCell((c, col) => {
           c.border = { bottom: { style: "thin", color: { argb: "FFC8E2D2" } } };
@@ -106,7 +106,7 @@ export async function GET(request) {
         });
       });
   });
-  [6, 30, 8, 22, 16, 11, 13, 18].forEach((w, i) => (ds.getColumn(i + 1).width = w));
+  [6, 30, 8, 22, 16, 11, 13, 13, 18].forEach((w, i) => (ds.getColumn(i + 1).width = w));
 
   const buffer = await wb.xlsx.writeBuffer();
   return new Response(buffer, {

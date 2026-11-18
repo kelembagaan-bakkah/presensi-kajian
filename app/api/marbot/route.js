@@ -29,6 +29,7 @@ export async function POST(request) {
     const b = await request.json();
     const data = await gasPost({
       action: "marbot_presensi",
+      jenis: b.jenis === "keluar" ? "keluar" : "masuk",
       id: b.id,
       pin: b.pin,
       lat: b.lat,
